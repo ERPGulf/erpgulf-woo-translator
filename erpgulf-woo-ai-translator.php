@@ -947,6 +947,122 @@ function erpgulf_gt_meta_box_render( $post ) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// AJAX — Empty all trashed products
+// ─────────────────────────────────────────────────────────────────
+
+add_action( 'wp_ajax_erpgulf_gt_empty_trash', function () {
+
+    if ( ! check_ajax_referer( 'erpgulf_gt_empty_trash', 'nonce', false ) ) {
+        wp_send_json_error( 'Security check failed.' );
+    }
+    if ( ! current_user_can( 'delete_products' ) ) {
+        wp_send_json_error( 'Insufficient permissions.' );
+    }
+
+    $trashed = get_posts( [
+        'post_type'      => 'product',
+        'post_status'    => 'trash',
+        'posts_per_page' => -1,
+        'fields'         => 'ids',
+    ] );
+
+    $count = 0;
+    foreach ( $trashed as $id ) {
+        if ( wp_delete_post( $id, true ) ) $count++;
+    }
+
+    wp_send_json_success( [ 'message' => "{$count} trashed product(s) permanently deleted." ] );
+} );
+
+// ─────────────────────────────────────────────────────────────────
+// AJAX — Fix stale WPML translation links
+// ─────────────────────────────────────────────────────────────────
+
+add_action( 'wp_ajax_erpgulf_gt_fix_wpml', function () {
+
+    if ( ! check_ajax_referer( 'erpgulf_gt_fix_wpml', 'nonce', false ) ) {
+        wp_send_json_error( 'Security check failed.' );
+    }
+    if ( ! current_user_can( 'manage_woocommerce' ) ) {
+        wp_send_json_error( 'Insufficient permissions.' );
+    }
+
+    global $wpdb;
+
+    // Delete WPML translation records pointing to posts that no longer exist
+    $deleted = $wpdb->query(
+        "DELETE icl FROM {$wpdb->prefix}icl_translations icl
+         LEFT JOIN {$wpdb->posts} p ON p.ID = icl.element_id
+         WHERE icl.element_type = 'post_product'
+           AND p.ID IS NULL"
+    );
+
+    // Also remove records pointing to trashed posts
+    $trashed = $wpdb->query(
+        "DELETE icl FROM {$wpdb->prefix}icl_translations icl
+         INNER JOIN {$wpdb->posts} p ON p.ID = icl.element_id
+         WHERE icl.element_type = 'post_product'
+           AND p.post_status = 'trash'"
+    );
+
+    $total = intval( $deleted ) + intval( $trashed );
+    wp_send_json_success( [ 'message' => "{$total} stale WPML record(s) removed." ] );
+} );
+
+// ─────────────────────────────────────────────────────────────────
+// AJAX — Translation status summary
+// ─────────────────────────────────────────────────────────────────
+
+add_action( 'wp_ajax_erpgulf_gt_status', function () {
+
+    if ( ! check_ajax_referer( 'erpgulf_gt_status', 'nonce', false ) ) {
+        wp_send_json_error( 'Security check failed.' );
+    }
+
+    global $wpdb;
+
+    $source_lang = erpgulf_gt_lang_name_to_code( get_option( 'erpgulf_gt_source_lang', 'Arabic' ) );
+    $target_lang = erpgulf_gt_lang_name_to_code( get_option( 'erpgulf_gt_target_lang', 'English' ) );
+
+    // Total Arabic products
+    $total_arabic = (int) $wpdb->get_var( $wpdb->prepare(
+        "SELECT COUNT(DISTINCT p.ID)
+         FROM {$wpdb->posts} p
+         INNER JOIN {$wpdb->prefix}icl_translations icl ON icl.element_id = p.ID
+         WHERE p.post_type = 'product' AND p.post_status = 'publish'
+           AND icl.element_type = 'post_product' AND icl.language_code = %s",
+        $source_lang
+    ) );
+
+    // Translated (have live English version)
+    $translated = (int) $wpdb->get_var( $wpdb->prepare(
+        "SELECT COUNT(DISTINCT ar.element_id)
+         FROM {$wpdb->prefix}icl_translations ar
+         INNER JOIN {$wpdb->prefix}icl_translations en ON en.trid = ar.trid AND en.language_code = %s
+         INNER JOIN {$wpdb->posts} enp ON enp.ID = en.element_id AND enp.post_status != 'trash'
+         INNER JOIN {$wpdb->posts} p ON p.ID = ar.element_id AND p.post_status = 'publish'
+         WHERE ar.language_code = %s AND ar.element_type = 'post_product'",
+        $target_lang, $source_lang
+    ) );
+
+    // Trashed English versions
+    $trashed = (int) $wpdb->get_var( $wpdb->prepare(
+        "SELECT COUNT(DISTINCT en.element_id)
+         FROM {$wpdb->prefix}icl_translations en
+         INNER JOIN {$wpdb->posts} p ON p.ID = en.element_id AND p.post_status = 'trash'
+         WHERE en.language_code = %s AND en.element_type = 'post_product'",
+        $target_lang
+    ) );
+
+    wp_send_json_success( [
+        'translated'   => $translated,
+        'untranslated' => $total_arabic - $translated,
+        'trashed'      => $trashed,
+        'total'        => $total_arabic,
+    ] );
+} );
+
+// ─────────────────────────────────────────────────────────────────
 // AJAX — Restore or permanently delete trashed English post
 // ─────────────────────────────────────────────────────────────────
 
@@ -1827,6 +1943,83 @@ function erpgulf_gt_bulk_page_render() {
             </div>
         </div>
 
+        {{!-- ── Maintenance Tools ── --}}
+        <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:20px;margin-bottom:20px;">
+            <h3 style="margin:0 0 14px;font-size:14px;color:#333;">🔧 Maintenance Tools</h3>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">
+
+                <div style="border:1px solid #e0e0e0;border-radius:6px;padding:14px;">
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">♻️ Regenerate Lookup Table</div>
+                    <div style="font-size:11px;color:#888;margin-bottom:10px;">Fixes admin SKU search for all products.</div>
+                    <button class="button button-small gt-tool-btn" style="width:100%;"
+                            data-tool="regen_lookup"
+                            data-nonce="<?php echo esc_attr( wp_create_nonce( 'erpgulf_gt_regen' ) ); ?>"
+                            data-action="erpgulf_gt_regen_lookup">
+                        Run
+                    </button>
+                    <div class="gt-tool-result" style="display:none;font-size:11px;margin-top:8px;"></div>
+                </div>
+
+                <div style="border:1px solid #e0e0e0;border-radius:6px;padding:14px;">
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">🔄 Sync Translated Products</div>
+                    <div style="font-size:11px;color:#888;margin-bottom:10px;">Copies missing fields to English versions.</div>
+                    <button class="button button-small gt-tool-btn" style="width:100%;"
+                            data-tool="sync_all"
+                            data-nonce="<?php echo esc_attr( wp_create_nonce( 'erpgulf_gt_sync_all' ) ); ?>"
+                            data-action="erpgulf_gt_sync_all">
+                        Run
+                    </button>
+                    <div class="gt-tool-result" style="display:none;font-size:11px;margin-top:8px;"></div>
+                </div>
+
+                <div style="border:1px solid #e0e0e0;border-radius:6px;padding:14px;">
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">🗑️ Empty Trash</div>
+                    <div style="font-size:11px;color:#888;margin-bottom:10px;">Permanently deletes all trashed products.</div>
+                    <button class="button button-small gt-tool-btn" style="width:100%;color:#cc1818;border-color:#cc1818;"
+                            data-tool="empty_trash"
+                            data-nonce="<?php echo esc_attr( wp_create_nonce( 'erpgulf_gt_empty_trash' ) ); ?>"
+                            data-action="erpgulf_gt_empty_trash"
+                            data-confirm="Permanently delete ALL trashed products? This cannot be undone.">
+                        Run
+                    </button>
+                    <div class="gt-tool-result" style="display:none;font-size:11px;margin-top:8px;"></div>
+                </div>
+
+                <div style="border:1px solid #e0e0e0;border-radius:6px;padding:14px;">
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">🔗 Fix WPML Links</div>
+                    <div style="font-size:11px;color:#888;margin-bottom:10px;">Removes stale WPML records pointing to deleted posts.</div>
+                    <button class="button button-small gt-tool-btn" style="width:100%;"
+                            data-tool="fix_wpml"
+                            data-nonce="<?php echo esc_attr( wp_create_nonce( 'erpgulf_gt_fix_wpml' ) ); ?>"
+                            data-action="erpgulf_gt_fix_wpml">
+                        Run
+                    </button>
+                    <div class="gt-tool-result" style="display:none;font-size:11px;margin-top:8px;"></div>
+                </div>
+
+                <div style="border:1px solid #e0e0e0;border-radius:6px;padding:14px;">
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">📊 Translation Status</div>
+                    <div style="font-size:11px;color:#888;margin-bottom:10px;">Shows translated vs untranslated count.</div>
+                    <button class="button button-small gt-tool-btn" style="width:100%;"
+                            data-tool="status"
+                            data-nonce="<?php echo esc_attr( wp_create_nonce( 'erpgulf_gt_status' ) ); ?>"
+                            data-action="erpgulf_gt_status">
+                        Check
+                    </button>
+                    <div class="gt-tool-result" style="display:none;font-size:11px;margin-top:8px;"></div>
+                </div>
+
+                <div style="border:1px solid #e0e0e0;border-radius:6px;padding:14px;">
+                    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">🔁 Reload Product List</div>
+                    <div style="font-size:11px;color:#888;margin-bottom:10px;">Refresh the untranslated products list.</div>
+                    <button class="button button-small" style="width:100%;" onclick="location.reload();">
+                        Reload
+                    </button>
+                </div>
+
+            </div>
+        </div>
+
         {{!-- ── Two column layout ── --}}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
 
@@ -1894,6 +2087,49 @@ function erpgulf_gt_bulk_page_render() {
         var paused     = false;
         var stopped    = false;
         var processing = false;
+
+        // ── Maintenance tool buttons ──────────────────────────────
+        $('.gt-tool-btn').on('click', function() {
+            var btn        = $(this);
+            var action     = btn.data('action');
+            var bnonce     = btn.data('nonce');
+            var confirmMsg = btn.data('confirm');
+            var $result    = btn.siblings('.gt-tool-result');
+            var origText   = btn.text();
+
+            if ( confirmMsg && ! confirm(confirmMsg) ) return;
+
+            btn.prop('disabled', true).text('Running...');
+            $result.hide();
+
+            $.post(ajaxurl, { action: action, nonce: bnonce }, function(res) {
+                btn.prop('disabled', false).text(origText);
+                if ( res.success ) {
+                    var msg = '';
+                    var d   = res.data;
+                    if ( action === 'erpgulf_gt_sync_all' ) {
+                        msg = '✅ ' + d.total + ' synced'
+                            + ' · Compat: ' + d.compatibility
+                            + ' · Stock: ' + d.branch_stock
+                            + ' · SKU: ' + d.sku
+                            + ' · Price: ' + d.price
+                            + ' · Cats: ' + d.categories;
+                    } else if ( action === 'erpgulf_gt_status' ) {
+                        msg = '📊 ' + d.translated + ' translated · '
+                            + d.untranslated + ' untranslated · '
+                            + d.trashed + ' in trash';
+                    } else {
+                        msg = '✅ ' + (d.message || 'Done.');
+                    }
+                    $result.show().css('color','#276749').text(msg);
+                } else {
+                    $result.show().css('color','#c53030').text('❌ ' + (res.data || 'Failed.'));
+                }
+            }).fail(function() {
+                btn.prop('disabled', false).text(origText);
+                $result.show().css('color','#c53030').text('❌ Network error.');
+            });
+        });
 
         // ── Select All toggle ─────────────────────────────────────
         $('#gt-select-all').on('change', function() {

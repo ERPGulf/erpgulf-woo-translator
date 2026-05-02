@@ -235,6 +235,31 @@ Shows only untranslated Arabic products (those with no English version in WPML).
 | ▶ Resume | Continue from where paused |
 | ⏹ Stop | Stop after current product — already translated items are saved |
 
+### Maintenance Tools
+
+Six tools available directly on the bulk page — no need to go to Settings:
+
+![Maintenance tools](screenshots/tools.png)
+
+| Tool | What it does |
+|---|---|
+| ♻️ Regenerate Lookup Table | Fixes admin SKU search for all products |
+| 🔄 Sync Translated Products | Copies missing fields (compat, stock, images, price, SKU, categories) to English versions without API calls |
+| 🗑️ Empty Trash | Permanently deletes all trashed products (requires confirmation) |
+| 🔗 Fix WPML Links | Removes stale WPML records pointing to deleted or trashed posts |
+| 📊 Translation Status | Shows a live count: translated · untranslated · in trash |
+| 🔁 Reload Product List | Refreshes the untranslated products list |
+
+**Status check example:**
+```
+📊 1952 translated · 738 untranslated · 12 in trash
+```
+
+**Sync result example:**
+```
+✅ 1952 synced · Compat: 47 · Stock: 312 · SKU: 89 · Price: 203 · Cats: 156
+```
+
 ### Product list
 Each product shows:
 - Checkbox (checked by default)
