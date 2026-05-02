@@ -55,6 +55,8 @@ erpgulf-woo-ai-translator/
 3. Click **Translate to English**
 4. Done — the English product is created or updated automatically
 
+![Single product translation](screenshots/single-translate.png)
+
 ### Bulk translate
 1. Go to **ERPGulf AI Translate → Bulk Translate**
 2. All untranslated Arabic products are listed with checkboxes
@@ -63,9 +65,13 @@ erpgulf-woo-ai-translator/
 5. Watch the live progress — each product shows ✅ or ❌ as it completes
 6. Use **⏸ Pause** or **⏹ Stop** at any time
 
+![Bulk translate page](screenshots/bulk-translate.png)
+
 ---
 
 ## AI Providers
+
+![Select AI provider](screenshots/select-ai-provider.png)
 
 ### Google Gemini (recommended — free)
 - **Free tier** available at aistudio.google.com
@@ -93,13 +99,21 @@ erpgulf-woo-ai-translator/
 ### Active AI Provider
 Select which AI handles translations. All credentials are saved — only the selected provider is used.
 
+![Gemini and ChatGPT options](screenshots/gemini-chatgpt-options.png)
+![Anthropic option](screenshots/anthropic-option.png)
+
 ### Translation Direction
+
+![Language selection](screenshots/language-selection.png)
+
 ```
 Source Language: Arabic    ← language products are written in
 Target Language: English   ← must match your WPML language name
 ```
 
 ### Fields to Translate
+
+![Field selections](screenshots/field-selections.png)
 Three groups of fields are auto-discovered from your products:
 
 **📝 Standard Fields**
@@ -116,6 +130,8 @@ Three groups of fields are auto-discovered from your products:
 - Any other ACF repeater fields found in your products
 
 ### Tools & Maintenance
+
+![WordPress tools](screenshots/wordpress-tools.png)
 
 **♻️ Regenerate Lookup Table**  
 Fixes admin SKU search for all translated products. Run once after bulk translation.
