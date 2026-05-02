@@ -1,5 +1,5 @@
 # ERPGulf AI Translate
-**Version:** 1.0.0  
+**Version:** 2.1.2  
 **Author:** Farook K — https://medium.com/nothing-big  
 **Requires:** WordPress 6.0+, WooCommerce 7.0+, WPML, PHP 8.1+  
 **Support:** support@erpgulf.com
@@ -17,6 +17,7 @@ Translates WooCommerce products from Arabic to English using AI — Gemini, Chat
 ```
 erpgulf-woo-ai-translator/
 ├── erpgulf-woo-ai-translator.php   ← main plugin file
+├── erpgulf-gt-pages.php            ← pages & posts translation page
 ├── gemini-provider.php             ← Google Gemini provider
 ├── openai-provider.php             ← OpenAI ChatGPT provider
 └── claude-provider.php             ← Anthropic Claude provider
@@ -213,7 +214,35 @@ On every Arabic product edit page, the **🤖 ERPGulf AI Translate** sidebar box
 
 ---
 
-## Bulk Translate Page
+## Pages & Posts Translation
+
+**Admin → ERPGulf AI Translate → Pages & Posts**
+
+Translate WordPress pages and blog posts — separate from WooCommerce products.
+
+![Translate Pages](screenshots/translate%20pages.png)
+
+### Pages tab
+Shows all published pages with their translation status:
+- ✅ Already translated — shows Arabic title, English title, Edit and Edit EN links, **↺ Retranslate** button
+- ⚠️ Not translated — shows Arabic title, Edit link, **Translate** button
+
+### Posts tab
+
+![Translate Blogs](screenshots/translate%20blogs.png)
+
+Same layout for blog posts — toggle between Pages and Posts using the tab buttons at the top.
+
+### Per-row translate button
+Every item has its own **Translate** or **↺ Retranslate** button. Click it to translate that single page or post immediately. The live log on the right shows the result including the English title after translation.
+
+### Stats bar
+Shows at a glance:
+- **Total** — all published pages/posts
+- **Translated ✅** — have a live English version
+- **Not Translated ⚠️** — no English version yet
+
+---
 
 **Admin → ERPGulf AI Translate → Bulk Translate**
 
@@ -559,6 +588,18 @@ Check that `branch_stock` meta key exists on the Arabic product. The auto-sync h
 ---
 
 ## Version History
+
+### 2.1.2
+- Pages & Posts translation page (`erpgulf-gt-pages.php`)
+- Shows all pages/posts with ✅/⚠️ translation status per row
+- Per-row Translate / ↺ Retranslate button
+- Edit and Edit EN links inline
+- Stats bar: Total · Translated · Not Translated
+- Maintenance tools on bulk page: Empty Trash, Fix WPML Links, Translation Status, Reload
+- Offer category (`offer_category`) synced alongside product categories
+- Trash detection on product meta box with Restore / Delete buttons
+- View English → link always visible when English version exists
+- `en_title` returned in AJAX response for bulk log display
 
 ### 1.0.0
 - Initial release

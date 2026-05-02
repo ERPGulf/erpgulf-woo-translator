@@ -47,6 +47,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 require_once plugin_dir_path(__FILE__) . 'gemini-provider.php';
 require_once plugin_dir_path(__FILE__) . 'openai-provider.php';
 require_once plugin_dir_path(__FILE__) . 'claude-provider.php';
+require_once plugin_dir_path(__FILE__) . 'erpgulf-gt-pages.php';
 
 // ─────────────────────────────────────────────────────────────────
 // PROVIDER REGISTRY
