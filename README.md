@@ -615,7 +615,7 @@ Check that `branch_stock` meta key exists on the Arabic product. The auto-sync h
 
 ---
 
-## Support
+## Contact us for Support
 
 **Email:** support@erpgulf.com  
 **Author:** Farook K — https://medium.com/nothing-big
