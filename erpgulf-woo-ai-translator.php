@@ -1389,7 +1389,8 @@ function erpgulf_gt_translate_repeater(
                 empty( trim( $value ) )
                 || is_numeric( $value )
                 || preg_match( '/^[\d,\s\-\/]+$/', $value )
-                || in_array( $sub_field, [ 'years', 'year', 'engine_size', 'size', 'id', 'model' ], true )
+                // || in_array( $sub_field, [ 'years', 'year', 'engine_size', 'size', 'id', 'model' ], true )
+                || in_array( $sub_field, [ 'years', 'year', 'engine_size', 'size', 'id' ], true )
             );
 
             if ( $skip_translate ) {
