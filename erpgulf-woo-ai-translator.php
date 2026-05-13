@@ -700,12 +700,17 @@ function erpgulf_gt_meta_box_render( $post ) {
     );
 
     if ( $current_lang && $current_lang !== $source_lang_code ) {
-        echo '<p style="font-size:12px;color:#888;font-family:sans-serif;margin:0;">'
-           . '⚙️ This is the <strong>' . esc_html( strtoupper( $current_lang ) ) . '</strong> version. '
-           . 'Open the <strong>Arabic</strong> product to translate.'
-           . '</p>';
-        return;
+    $original_id  = apply_filters( 'wpml_object_id', $post->ID, 'product', false, $source_lang_code );
+    $original_url = $original_id ? get_edit_post_link( $original_id ) : null;
+    echo '<p style="font-size:12px;color:#888;font-family:sans-serif;margin:0 0 8px;">'
+       . '⚙️ This is the <strong>' . esc_html( strtoupper( $current_lang ) ) . '</strong> version.</p>';
+    if ( $original_url ) {
+        echo '<a href="' . esc_url( $original_url ) . '" class="button button-secondary" style="width:100%;text-align:center;font-size:12px;">'
+           . '← Go to ' . esc_html( strtoupper( $source_lang_code ) ) . ' Original'
+           . '</a>';
     }
+    return;
+}
 
     $registry      = erpgulf_gt_ai_providers();
     $active_key    = erpgulf_gt_active_provider();
