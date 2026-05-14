@@ -749,6 +749,45 @@ function erpgulf_gt_meta_box_render( $post ) {
             <?php echo esc_html( $source_lang ); ?> → <?php echo esc_html( $target_lang ); ?>
         </p>
 
+        <?php
+        $_price_val      = get_post_meta( $post->ID, '_price', true );
+        $_regular_val    = get_post_meta( $post->ID, '_regular_price', true );
+        $_sale_val       = get_post_meta( $post->ID, '_sale_price', true );
+        $woosb_price_val = get_post_meta( $post->ID, 'woosb_price', true );
+        $woosb_fixed_val = get_post_meta( $post->ID, 'woosb_fixed_price', true );
+        ?>
+        <div style="font-size:11px;color:#555;margin:0 0 10px;background:#f9f9f9;padding:8px;border-radius:4px;border:1px solid #e5e5e5;">
+            <strong style="display:block;margin-bottom:4px;">💰 Price Meta</strong>
+            <table style="width:100%;border-collapse:collapse;">
+                <tr>
+                    <td style="padding:2px 4px;color:#888;">_price</td>
+                    <td style="padding:2px 4px;font-weight:600;"><?php echo $_price_val !== '' ? esc_html( $_price_val ) : '—'; ?></td>
+                </tr>
+                <tr>
+                    <td style="padding:2px 4px;color:#888;">_regular</td>
+                    <td style="padding:2px 4px;"><?php echo $_regular_val !== '' ? esc_html( $_regular_val ) : '—'; ?></td>
+                </tr>
+                <tr>
+                    <td style="padding:2px 4px;color:#888;">_sale</td>
+                    <td style="padding:2px 4px;color:<?php echo $_sale_val ? '#c0392b' : '#888'; ?>;">
+                        <?php echo $_sale_val !== '' ? esc_html( $_sale_val ) : '—'; ?>
+                    </td>
+                </tr>
+                <?php if ( $woosb_price_val !== '' ) : ?>
+                <tr>
+                    <td style="padding:2px 4px;color:#888;">woosb_price</td>
+                    <td style="padding:2px 4px;"><?php echo esc_html( $woosb_price_val ); ?></td>
+                </tr>
+                <?php endif; ?>
+                <?php if ( $woosb_fixed_val !== '' ) : ?>
+                <tr>
+                    <td style="padding:2px 4px;color:#888;">woosb_fixed</td>
+                    <td style="padding:2px 4px;"><?php echo esc_html( $woosb_fixed_val ); ?></td>
+                </tr>
+                <?php endif; ?>
+            </table>
+        </div>
+
         <p style="font-size:12px;color:#555;margin:0 0 10px;">
             <strong>Fields:</strong>
             <?php
