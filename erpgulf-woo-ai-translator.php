@@ -1302,7 +1302,8 @@ function erpgulf_gt_save_to_wpml( int $ar_post_id, array $translations, string $
     if ( $en_post_id && $en_post_id !== $ar_post_id ) {
 
         $update_args = [ 'ID' => $en_post_id ];
-        if ( isset( $translations['title'] ) )   $update_args['post_title']   = $translations['title'];
+        // if ( isset( $translations['title'] ) )   $update_args['post_title']   = $translations['title'];
+        if ( isset( $translations['title'] ) )   $update_args['post_title']   = wp_strip_all_tags( $translations['title'] );
         if ( isset( $translations['content'] ) ) $update_args['post_content'] = $translations['content'];
         if ( isset( $translations['excerpt'] ) ) $update_args['post_excerpt'] = $translations['excerpt'];
 
@@ -1345,7 +1346,8 @@ function erpgulf_gt_save_to_wpml( int $ar_post_id, array $translations, string $
         'post_type'    => 'product',
         'post_status'  => $ar_post->post_status,
         'post_author'  => $ar_post->post_author,
-        'post_title'   => $translations['title']   ?? $ar_post->post_title,
+        // 'post_title'   => $translations['title']   ?? $ar_post->post_title,
+        'post_title'   => wp_strip_all_tags( $translations['title'] ?? $ar_post->post_title ),
         'post_content' => $translations['content'] ?? $ar_post->post_content,
         'post_excerpt' => $translations['excerpt'] ?? $ar_post->post_excerpt,
     ], true );
