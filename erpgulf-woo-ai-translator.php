@@ -587,6 +587,19 @@ function erpgulf_gt_settings_render() {
                     </td>
                 </tr>
                 <tr>
+                    <th>Fitment Resync ( Vehicles CSV )</th>
+                    <td>
+                        <button type="button" id="erpgulf-gt-csv-btn" class="button button-secondary">
+                            🚗 Regenerate Vehicles CSV
+                        </button>
+                        <p class="description" style="margin-top:6px;">
+                            Regenerates <code>vehicles.csv</code> from the fitments database.
+                            Run after adding or updating any product compatibility data.
+                        </p>
+                        <div id="erpgulf-gt-csv-result" style="display:none;margin-top:10px;padding:10px;border-radius:4px;font-size:13px;"></div>
+                    </td>
+                </tr>
+                <tr>
                     <th>Sync Existing Translations</th>
                     <td>
                         <button type="button" id="erpgulf-gt-sync-btn" class="button button-secondary">
@@ -631,7 +644,31 @@ function erpgulf_gt_settings_render() {
                         .html('❌ Network error.');
                 });
             });
-
+            $('#erpgulf-gt-csv-btn').on('click', function() {
+                var btn = $(this);
+                btn.prop('disabled', true).text('Generating...');
+                $('#erpgulf-gt-csv-result').hide();
+                $.post(ajaxurl, {
+                    action: 'erpgulf_gt_regen_csv',
+                    nonce:  '<?php echo esc_js( wp_create_nonce( "erpgulf_gt_regen_csv" ) ); ?>'
+                }, function(res) {
+                    btn.prop('disabled', false).text('🚗 Regenerate Vehicles CSV');
+                    if (res.success) {
+                        $('#erpgulf-gt-csv-result').show()
+                            .css({'background':'#f0fff4','border':'1px solid #68d391','color':'#276749'})
+                            .html('✅ ' + res.data.message);
+                    } else {
+                        $('#erpgulf-gt-csv-result').show()
+                            .css({'background':'#fff5f5','border':'1px solid #fc8181','color':'#c53030'})
+                            .html('❌ ' + (res.data || 'Failed.'));
+                    }
+                }).fail(function() {
+                    btn.prop('disabled', false).text('🚗 Regenerate Vehicles CSV');
+                    $('#erpgulf-gt-csv-result').show()
+                        .css({'background':'#fff5f5','border':'1px solid #fc8181','color':'#c53030'})
+                        .html('❌ Network error.');
+                });
+            });
             $('#erpgulf-gt-sync-btn').on('click', function() {
                 var btn = $(this);
                 btn.prop('disabled', true).text('Syncing...');
@@ -1501,6 +1538,7 @@ function erpgulf_gt_sync_woo_fields( int $from_id, int $to_id, bool $is_create =
     $always_copy = [
         '_thumbnail_id', '_product_image_gallery',
         '_virtual', '_downloadable', '_sold_individually', '_featured', '_visibility',
+        'mark_spare_part',
     ];
 
     $create_only = [
@@ -2354,8 +2392,8 @@ add_action( 'admin_notices', function () {
 // ─────────────────────────────────────────────────────────────────
 
 function erpgulf_gt_branch_stock_sync( $meta_id, $post_id, $meta_key, $meta_value ): void {
-
-    if ( strpos( $meta_key, 'branch_stock' ) === false ) return;
+    if ( strpos( $meta_key, 'branch_stock' ) === false && $meta_key !== 'mark_spare_part' ) return;
+    
 
     $post = get_post( $post_id );
     if ( ! $post || $post->post_type !== 'product' ) return;
@@ -2377,3 +2415,86 @@ function erpgulf_gt_branch_stock_sync( $meta_id, $post_id, $meta_key, $meta_valu
 
 add_action( 'updated_post_meta', 'erpgulf_gt_branch_stock_sync', 10, 4 );
 add_action( 'added_post_meta',   'erpgulf_gt_branch_stock_sync', 10, 4 );
+
+// ─────────────────────────────────────────────────────────────────
+// VEHICLES CSV — Generate from fitments DB
+// ─────────────────────────────────────────────────────────────────
+
+function erpgulf_gt_generate_vehicles_csv(): array {
+
+    global $wpdb;
+
+    $csv_path = file_exists( get_stylesheet_directory() . '/data/vehicles.csv' )
+        ? get_stylesheet_directory() . '/data/vehicles.csv'
+        : get_template_directory() . '/data/vehicles.csv';
+
+    $rows = $wpdb->get_results(
+        "SELECT f.id, f.product_id, f.adv_brand, f.adv_model, f.adv_variant, f.adv_year
+         FROM {$wpdb->prefix}adv_product_fitments f
+         INNER JOIN {$wpdb->posts} p ON p.ID = f.product_id
+         WHERE p.post_status = 'publish'
+         ORDER BY f.id ASC",
+        ARRAY_A
+    );
+
+    if ( $rows === null ) {
+        return [ 'success' => false, 'message' => 'DB query failed.' ];
+    }
+
+    $handle = fopen( $csv_path, 'w' );
+    if ( ! $handle ) {
+        return [ 'success' => false, 'message' => 'Cannot write to ' . $csv_path ];
+    }
+
+    // Write header once
+    fputcsv( $handle, [ 'id', 'product_id', 'adv_brand', 'adv_model', 'adv_variant', 'adv_year' ] );
+
+    foreach ( $rows as $row ) {
+        fputcsv( $handle, [
+            $row['id'],
+            $row['product_id'],
+            $row['adv_brand'],
+            $row['adv_model'],
+            $row['adv_variant'],
+            $row['adv_year'],
+        ] );
+    }
+
+    fclose( $handle );
+
+    return [
+        'success' => true,
+        'message' => number_format( count( $rows ) ) . ' fitment rows written to vehicles.csv',
+    ];
+}
+
+add_action( 'wp_ajax_erpgulf_gt_regen_csv', function () {
+
+    if ( ! check_ajax_referer( 'erpgulf_gt_regen_csv', 'nonce', false ) ) {
+        wp_send_json_error( 'Security check failed.' );
+    }
+    if ( ! current_user_can( 'manage_woocommerce' ) ) {
+        wp_send_json_error( 'Insufficient permissions.' );
+    }
+
+    $result = erpgulf_gt_generate_vehicles_csv();
+    if ( $result['success'] ) {
+        wp_send_json_success( [ 'message' => $result['message'] ] );
+    } else {
+        wp_send_json_error( $result['message'] );
+    }
+} );
+
+// ─────────────────────────────────────────────────────────────────
+// AUTO-TRIGGER — Regenerate CSV when fitments are saved
+// ─────────────────────────────────────────────────────────────────
+
+add_action( 'updated_post_meta', 'erpgulf_gt_fitment_csv_sync', 10, 4 );
+add_action( 'added_post_meta',   'erpgulf_gt_fitment_csv_sync', 10, 4 );
+
+function erpgulf_gt_fitment_csv_sync( $meta_id, $post_id, $meta_key, $meta_value ): void {
+    if ( $meta_key !== 'add_compactable_details' ) return;
+    $post = get_post( $post_id );
+    if ( ! $post || $post->post_type !== 'product' ) return;
+    erpgulf_gt_generate_vehicles_csv();
+}
