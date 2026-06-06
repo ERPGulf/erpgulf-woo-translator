@@ -1,16 +1,17 @@
 <?php
+
 /**
  * ERPGulf AI Translate — Pages & Posts
  * Include this file from the main plugin via require_once
  */
-
-if ( ! defined( 'ABSPATH' ) ) exit;
+if (!defined('ABSPATH'))
+    exit;
 
 // ─────────────────────────────────────────────────────────────────
 // REGISTER SUBMENU
 // ─────────────────────────────────────────────────────────────────
 
-add_action( 'admin_menu', function () {
+add_action('admin_menu', function () {
     add_submenu_page(
         'erpgulf-woo-ai-translator',
         'Translate Pages & Posts',
@@ -19,29 +20,30 @@ add_action( 'admin_menu', function () {
         'erpgulf-gt-pages',
         'erpgulf_gt_pages_render'
     );
-}, 20 );
+}, 20);
 
 // ─────────────────────────────────────────────────────────────────
 // PAGE RENDER
 // ─────────────────────────────────────────────────────────────────
 
-function erpgulf_gt_pages_render() {
+function erpgulf_gt_pages_render()
+{
+    $registry = erpgulf_gt_ai_providers();
+    $active_key = erpgulf_gt_active_provider();
+    $active_info = $registry[$active_key];
+    $source_lang = get_option('erpgulf_gt_source_lang', 'Arabic');
+    $target_lang = get_option('erpgulf_gt_target_lang', 'English');
+    $lang_code = erpgulf_gt_lang_name_to_code($source_lang);
+    $nonce = wp_create_nonce('erpgulf_gt_translate_page');
+    $api_key_ok = !empty(get_option($active_info['key_option'], ''));
 
-    $registry    = erpgulf_gt_ai_providers();
-    $active_key  = erpgulf_gt_active_provider();
-    $active_info = $registry[ $active_key ];
-    $source_lang = get_option( 'erpgulf_gt_source_lang', 'Arabic' );
-    $target_lang = get_option( 'erpgulf_gt_target_lang', 'English' );
-    $lang_code   = erpgulf_gt_lang_name_to_code( $source_lang );
-    $nonce       = wp_create_nonce( 'erpgulf_gt_translate_page' );
-    $api_key_ok  = ! empty( get_option( $active_info['key_option'], '' ) );
-
-    $post_type = sanitize_key( $_GET['ptype'] ?? 'page' );
-    if ( ! in_array( $post_type, [ 'page', 'post' ], true ) ) $post_type = 'page';
+    $post_type = sanitize_key($_GET['ptype'] ?? 'page');
+    if (!in_array($post_type, ['page', 'post'], true))
+        $post_type = 'page';
 
     global $wpdb;
 
-    $untranslated = $wpdb->get_results( $wpdb->prepare(
+    $untranslated = $wpdb->get_results($wpdb->prepare(
         "SELECT p.ID, p.post_title, p.post_type, p.post_date,
                 en.element_id as en_id,
                 enp.post_status as en_status,
@@ -59,11 +61,11 @@ function erpgulf_gt_pages_render() {
          ORDER BY p.post_title ASC
          LIMIT 500",
         'post_' . $post_type,
-        erpgulf_gt_lang_name_to_code( $target_lang ),
+        erpgulf_gt_lang_name_to_code($target_lang),
         $post_type
-    ) );
+    ));
 
-    $total = count( $untranslated );
+    $total = count($untranslated);
     ?>
     <div class="wrap" style="max-width:1000px;">
 
@@ -71,28 +73,28 @@ function erpgulf_gt_pages_render() {
             <div>
                 <h1 style="margin:0;">📄 Translate Pages &amp; Posts</h1>
                 <p style="color:#666;margin:4px 0 0;font-size:13px;">
-                    Untranslated <?php echo esc_html( $source_lang ); ?> content
-                    → <?php echo esc_html( $target_lang ); ?>
-                    via <?php echo esc_html( $active_info['label'] ); ?>
+                    Untranslated <?php echo esc_html($source_lang); ?> content
+                    → <?php echo esc_html($target_lang); ?>
+                    via <?php echo esc_html($active_info['label']); ?>
                 </p>
             </div>
-            <a href="<?php echo esc_url( admin_url( 'admin.php?page=erpgulf-woo-ai-translator' ) ); ?>"
+            <a href="<?php echo esc_url(admin_url('admin.php?page=erpgulf-woo-ai-translator')); ?>"
                class="button">← Settings</a>
         </div>
 
-        <?php if ( ! $api_key_ok ): ?>
+        <?php if (!$api_key_ok): ?>
             <div style="background:#fff5f5;border:1px solid #fc8181;border-radius:6px;padding:16px;margin-bottom:20px;">
-                ⚠️ <strong><?php echo esc_html( $active_info['label'] ); ?> API key is not set.</strong>
-                <a href="<?php echo esc_url( admin_url( 'admin.php?page=erpgulf-woo-ai-translator' ) ); ?>">Go to Settings →</a>
+                ⚠️ <strong><?php echo esc_html($active_info['label']); ?> API key is not set.</strong>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=erpgulf-woo-ai-translator')); ?>">Go to Settings →</a>
             </div>
         <?php endif; ?>
 
         <div style="display:flex;gap:8px;margin-bottom:20px;">
-            <a href="<?php echo esc_url( admin_url( 'admin.php?page=erpgulf-gt-pages&ptype=page' ) ); ?>"
+            <a href="<?php echo esc_url(admin_url('admin.php?page=erpgulf-gt-pages&ptype=page')); ?>"
                class="button <?php echo $post_type === 'page' ? 'button-primary' : ''; ?>">
                 📄 Pages
             </a>
-            <a href="<?php echo esc_url( admin_url( 'admin.php?page=erpgulf-gt-pages&ptype=post' ) ); ?>"
+            <a href="<?php echo esc_url(admin_url('admin.php?page=erpgulf-gt-pages&ptype=post')); ?>"
                class="button <?php echo $post_type === 'post' ? 'button-primary' : ''; ?>">
                 📝 Posts
             </a>
@@ -100,11 +102,13 @@ function erpgulf_gt_pages_render() {
 
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
             <?php
-            $count_translated   = 0;
+            $count_translated = 0;
             $count_untranslated = 0;
-            foreach ( $untranslated as $p ) {
-                if ( $p->en_id && $p->en_status && $p->en_status !== 'trash' ) $count_translated++;
-                else $count_untranslated++;
+            foreach ($untranslated as $p) {
+                if ($p->en_id && $p->en_status && $p->en_status !== 'trash')
+                    $count_translated++;
+                else
+                    $count_untranslated++;
             }
             ?>
             <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:16px;text-align:center;">
@@ -133,7 +137,7 @@ function erpgulf_gt_pages_render() {
             </div>
             <div style="display:flex;gap:10px;">
                 <button id="pg-btn-start" class="button button-primary" style="min-width:120px;"
-                        <?php echo ! $api_key_ok ? 'disabled' : ''; ?>>▶ Start All</button>
+                        <?php echo !$api_key_ok ? 'disabled' : ''; ?>>▶ Start All</button>
                 <button id="pg-btn-pause" class="button" style="min-width:120px;display:none;">⏸ Pause</button>
                 <button id="pg-btn-resume" class="button button-primary" style="min-width:120px;display:none;">▶ Resume</button>
                 <button id="pg-btn-stop" class="button" style="min-width:120px;color:#cc1818;border-color:#cc1818;display:none;">⏹ Stop</button>
@@ -145,52 +149,53 @@ function erpgulf_gt_pages_render() {
             <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                     <h3 style="margin:0;font-size:14px;">
-                        📋 <?php echo ucfirst( $post_type ); ?>s (<?php echo $total; ?>)
+                        📋 <?php echo ucfirst($post_type); ?>s (<?php echo $total; ?>)
                     </h3>
                 </div>
                 <div style="max-height:520px;overflow-y:auto;font-size:12px;" id="pg-item-list">
-                    <?php foreach ( $untranslated as $p ):
+                    <?php
+                    foreach ($untranslated as $p):
                         $is_translated = $p->en_id && $p->en_status && $p->en_status !== 'trash';
-                        $en_title      = $p->en_title ?: '';
-                        $row_bg        = $is_translated ? '#f9fff9' : '#fff';
-                    ?>
+                        $en_title = $p->en_title ?: '';
+                        $row_bg = $is_translated ? '#f9fff9' : '#fff';
+                        ?>
                         <div class="pg-item-row"
-                             data-id="<?php echo esc_attr( $p->ID ); ?>"
-                             data-type="<?php echo esc_attr( $p->post_type ); ?>"
-                             data-title="<?php echo esc_attr( $p->post_title ); ?>"
+                             data-id="<?php echo esc_attr($p->ID); ?>"
+                             data-type="<?php echo esc_attr($p->post_type); ?>"
+                             data-title="<?php echo esc_attr($p->post_title); ?>"
                              style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid #f0f0f0;background:<?php echo $row_bg; ?>">
                             <span class="pg-row-icon" style="width:18px;flex-shrink:0;font-size:14px;">
                                 <?php echo $is_translated ? '✅' : '⚠️'; ?>
                             </span>
                             <div style="flex:1;min-width:0;">
                                 <div style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500;"
-                                     title="<?php echo esc_attr( $p->post_title ); ?>">
-                                    <?php echo esc_html( $p->post_title ?: '(no title)' ); ?>
+                                     title="<?php echo esc_attr($p->post_title); ?>">
+                                    <?php echo esc_html($p->post_title ?: '(no title)'); ?>
                                 </div>
                                 <div style="color:#888;font-size:11px;margin-top:1px;">
-                                    ID: <?php echo esc_html( $p->ID ); ?>
+                                    ID: <?php echo esc_html($p->ID); ?>
                                     &nbsp;·&nbsp;
-                                    <?php echo esc_html( date( 'Y-m-d', strtotime( $p->post_date ) ) ); ?>
-                                    <?php if ( $is_translated && $en_title ): ?>
+                                    <?php echo esc_html(date('Y-m-d', strtotime($p->post_date))); ?>
+                                    <?php if ($is_translated && $en_title): ?>
                                         &nbsp;·&nbsp;
-                                        <span style="color:#276749;">EN: <?php echo esc_html( mb_substr( $en_title, 0, 35 ) ); ?></span>
+                                        <span style="color:#276749;">EN: <?php echo esc_html(mb_substr($en_title, 0, 35)); ?></span>
                                     <?php endif; ?>
                                     &nbsp;·&nbsp;
-                                    <a href="<?php echo esc_url( get_edit_post_link( $p->ID ) ); ?>" target="_blank">Edit</a>
-                                    <?php if ( $is_translated && $p->en_id ): ?>
+                                    <a href="<?php echo esc_url(get_edit_post_link($p->ID)); ?>" target="_blank">Edit</a>
+                                    <?php if ($is_translated && $p->en_id): ?>
                                         &nbsp;·&nbsp;
-                                        <a href="<?php echo esc_url( get_edit_post_link( $p->en_id ) ); ?>" target="_blank">Edit EN</a>
+                                        <a href="<?php echo esc_url(get_edit_post_link($p->en_id)); ?>" target="_blank">Edit EN</a>
                                     <?php endif; ?>
                                 </div>
                             </div>
                             <button class="pg-translate-one button button-small"
-                                    data-id="<?php echo esc_attr( $p->ID ); ?>"
+                                    data-id="<?php echo esc_attr($p->ID); ?>"
                                     style="flex-shrink:0;font-size:10px;<?php echo $is_translated ? 'color:#888;' : ''; ?>">
                                 <?php echo $is_translated ? '↺ Retranslate' : 'Translate'; ?>
                             </button>
                         </div>
                     <?php endforeach; ?>
-                    <?php if ( empty( $untranslated ) ): ?>
+                    <?php if (empty($untranslated)): ?>
                         <p style="color:#888;text-align:center;padding:20px 0;">
                             No <?php echo $post_type; ?>s found.
                         </p>
@@ -211,8 +216,8 @@ function erpgulf_gt_pages_render() {
     <script>
     jQuery(document).ready(function($) {
 
-        var nonce      = '<?php echo esc_js( $nonce ); ?>';
-        var targetLang = '<?php echo esc_js( $target_lang ); ?>';
+        var nonce      = '<?php echo esc_js($nonce); ?>';
+        var targetLang = '<?php echo esc_js($target_lang); ?>';
         var queue      = [];
         var done = 0, failed = 0;
         var paused = false, stopped = false, processing = false;
@@ -250,11 +255,22 @@ function erpgulf_gt_pages_render() {
             log('🔄', '[ID:' + postId + '] ' + title.substring(0,50) + '...', '#007cba');
 
             $.post(ajaxurl, {
-                action:    'erpgulf_gt_translate_page',
-                post_id:   postId,
-                post_type: type,
-                nonce:     nonce
+                action:  'erpgulf_gt_translate',
+                post_id: postId,
+                nonce:   nonce
             }, function(res) {
+                // ✅ Auto-refresh nonce on security failure and retry once
+                if ( ! res.success && res.data && res.data.indexOf('Security') !== -1 ) {
+                    $.post(ajaxurl, { action: 'erpgulf_gt_refresh_nonce' }, function(r) {
+                        if (r.success) {
+                            nonce = r.data.nonce;
+                            log('🔄', 'Nonce refreshed, retrying...', '#888');
+                            queue.unshift(postId); // put back at front
+                            setTimeout(processNext, 500);
+                        }
+                    });
+                    return;
+                }
                 if (res.success) {
                     done++;
                     setRowIcon(postId, '✅');
@@ -343,103 +359,139 @@ function erpgulf_gt_pages_render() {
 // ─────────────────────────────────────────────────────────────────
 // AJAX — Translate a single page or post
 // ─────────────────────────────────────────────────────────────────
-
-add_action( 'wp_ajax_erpgulf_gt_translate_page', 'erpgulf_gt_handle_translate_page' );
-
-function erpgulf_gt_handle_translate_page() {
-
-    if ( ! check_ajax_referer( 'erpgulf_gt_translate_page', 'nonce', false ) ) {
-        wp_send_json_error( 'Security check failed.' );
+// ─────────────────────────────────────────────────────────────────
+// AJAX — Refresh nonce
+// ─────────────────────────────────────────────────────────────────
+add_action('wp_ajax_erpgulf_gt_refresh_nonce', function () {
+    if (!current_user_can('edit_products')) {
+        wp_send_json_error('Insufficient permissions.');
     }
-    if ( ! current_user_can( 'edit_pages' ) ) {
-        wp_send_json_error( 'Insufficient permissions.' );
+    wp_send_json_success([
+        'nonce' => wp_create_nonce('erpgulf_gt_translate'),
+    ]);
+});
+
+add_action('wp_ajax_erpgulf_gt_translate_page', 'erpgulf_gt_handle_translate_page');
+
+function erpgulf_gt_handle_translate_page()
+{
+    if (!check_ajax_referer('erpgulf_gt_translate_page', 'nonce', false)) {
+        wp_send_json_error('Security check failed.');
+    }
+    if (!current_user_can('edit_pages')) {
+        wp_send_json_error('Insufficient permissions.');
     }
 
-    $post_id   = intval( $_POST['post_id'] ?? 0 );
-    $post_type = sanitize_key( $_POST['post_type'] ?? 'page' );
+    $post_id = intval($_POST['post_id'] ?? 0);
+    $post_type = sanitize_key($_POST['post_type'] ?? 'page');
 
-    if ( ! $post_id ) wp_send_json_error( 'Invalid ID.' );
+    if (!$post_id)
+        wp_send_json_error('Invalid ID.');
 
-    $post = get_post( $post_id );
-    if ( ! $post ) wp_send_json_error( 'Post not found.' );
+    $post = get_post($post_id);
+    if (!$post)
+        wp_send_json_error('Post not found.');
 
-    $registry     = erpgulf_gt_ai_providers();
-    $active_key   = erpgulf_gt_active_provider();
-    $active_info  = $registry[ $active_key ];
+    $registry = erpgulf_gt_ai_providers();
+    $active_key = erpgulf_gt_active_provider();
+    $active_info = $registry[$active_key];
     $translate_fn = 'erpgulf_gt_translate_' . $active_key;
 
-    if ( ! function_exists( $translate_fn ) ) wp_send_json_error( 'Provider not found.' );
-    if ( empty( get_option( $active_info['key_option'], '' ) ) ) wp_send_json_error( 'API key not set.' );
+    if (!function_exists($translate_fn))
+        wp_send_json_error('Provider not found.');
+    if (empty(get_option($active_info['key_option'], '')))
+        wp_send_json_error('API key not set.');
 
     $settings = [
-        'gemini_api_key' => get_option( 'erpgulf_gt_gemini_api_key', '' ),
-        'gemini_model'   => get_option( 'erpgulf_gt_gemini_model',   'gemini-2.0-flash' ),
-        'openai_api_key' => get_option( 'erpgulf_gt_openai_api_key', '' ),
-        'openai_model'   => get_option( 'erpgulf_gt_openai_model',   'gpt-4o-mini' ),
-        'claude_api_key' => get_option( 'erpgulf_gt_claude_api_key', '' ),
-        'claude_model'   => get_option( 'erpgulf_gt_claude_model',   'claude-haiku-4-5-20251001' ),
+        'gemini_api_key' => get_option('erpgulf_gt_gemini_api_key', ''),
+        'gemini_model' => get_option('erpgulf_gt_gemini_model', 'gemini-2.0-flash'),
+        'openai_api_key' => get_option('erpgulf_gt_openai_api_key', ''),
+        'openai_model' => get_option('erpgulf_gt_openai_model', 'gpt-4o-mini'),
+        'claude_api_key' => get_option('erpgulf_gt_claude_api_key', ''),
+        'claude_model' => get_option('erpgulf_gt_claude_model', 'claude-haiku-4-5-20251001'),
     ];
 
-    $source_lang = get_option( 'erpgulf_gt_source_lang', 'Arabic' );
-    $target_lang = get_option( 'erpgulf_gt_target_lang', 'English' );
-    $lang_code   = erpgulf_gt_lang_name_to_code( $target_lang );
+    $source_lang = get_option('erpgulf_gt_source_lang', 'Arabic');
+    $target_lang = get_option('erpgulf_gt_target_lang', 'English');
+    $lang_code = erpgulf_gt_lang_name_to_code($target_lang);
 
     $translations = [];
     $fields = [
-        'title'   => $post->post_title,
+        'title' => $post->post_title,
         'content' => $post->post_content,
         'excerpt' => $post->post_excerpt,
     ];
 
-    foreach ( $fields as $field => $source_text ) {
-        if ( empty( trim( $source_text ) ) ) continue;
+    foreach ($fields as $field => $source_text) {
+        if (empty(trim($source_text)))
+            continue;
         $prompt = "Translate the following {$source_lang} text to {$target_lang}. "
-                . "Return only the translated text. No explanation. Preserve HTML tags.\n\n{$source_text}";
-        $result = $translate_fn( $prompt, $settings );
-        if ( ! is_wp_error( $result ) ) {
-            $translations[ $field ] = trim( $result );
+            . "Return only the translated text. No explanation. Preserve HTML tags.\n\n{$source_text}";
+        $result = $translate_fn($prompt, $settings);
+        if (!is_wp_error($result)) {
+            $translations[$field] = trim($result);
         }
     }
 
-    if ( empty( $translations ) ) wp_send_json_error( 'Nothing to translate.' );
+    if (empty($translations))
+        wp_send_json_error('Nothing to translate.');
 
-    $trid       = apply_filters( 'wpml_element_trid', null, $post_id, 'post_' . $post_type );
-    $en_post_id = apply_filters( 'wpml_object_id', $post_id, $post_type, false, $lang_code );
-    $en_status  = $en_post_id ? get_post_status( $en_post_id ) : false;
+    $trid = apply_filters('wpml_element_trid', null, $post_id, 'post_' . $post_type);
+    $en_post_id = apply_filters('wpml_object_id', $post_id, $post_type, false, $lang_code);
+    $en_status = $en_post_id ? get_post_status($en_post_id) : false;
 
-    if ( $en_post_id && $en_status && $en_status !== 'trash' ) {
-        wp_update_post( [
-            'ID'           => $en_post_id,
-            'post_title'   => $translations['title']   ?? $post->post_title,
+    if ($en_post_id && $en_status && $en_status !== 'trash') {
+        wp_update_post([
+            'ID' => $en_post_id,
+            'post_title' => $translations['title'] ?? $post->post_title,
             'post_content' => $translations['content'] ?? $post->post_content,
             'post_excerpt' => $translations['excerpt'] ?? '',
-        ] );
+        ]);
     } else {
-        do_action( 'wpml_switch_language', $lang_code );
-        $en_post_id = wp_insert_post( [
-            'post_type'    => $post_type,
-            'post_status'  => $post->post_status,
-            'post_author'  => $post->post_author,
-            'post_title'   => $translations['title']   ?? $post->post_title,
+        do_action('wpml_switch_language', $lang_code);
+        $en_post_id = wp_insert_post([
+            'post_type' => $post_type,
+            'post_status' => $post->post_status,
+            'post_author' => $post->post_author,
+            'post_title' => $translations['title'] ?? $post->post_title,
             'post_content' => $translations['content'] ?? $post->post_content,
             'post_excerpt' => $translations['excerpt'] ?? '',
-        ] );
-        do_action( 'wpml_switch_language', ICL_LANGUAGE_CODE );
+        ]);
+        do_action('wpml_switch_language', ICL_LANGUAGE_CODE);
 
-        if ( is_wp_error( $en_post_id ) ) wp_send_json_error( $en_post_id->get_error_message() );
+        if (is_wp_error($en_post_id))
+            wp_send_json_error($en_post_id->get_error_message());
 
-        do_action( 'wpml_set_element_language_details', [
-            'element_id'           => $en_post_id,
-            'element_type'         => 'post_' . $post_type,
-            'trid'                 => $trid,
-            'language_code'        => $lang_code,
-            'source_language_code' => ICL_LANGUAGE_CODE,
-        ] );
+        do_action('wpml_set_element_language_details', [
+            'element_id' => $en_post_id,
+            'element_type' => 'post_' . $post_type,
+            'trid' => $trid,
+            'language_code' => $lang_code,
+            'source_language_code' => 'ar',
+        ]);
+
+        // Direct DB fallback
+        if ($trid) {
+            global $wpdb;
+            $existing = $wpdb->get_var($wpdb->prepare(
+                "SELECT translation_id FROM {$wpdb->prefix}icl_translations WHERE element_id = %d AND element_type = %s",
+                $en_post_id, 'post_' . $post_type
+            ));
+            if (!$existing) {
+                $wpdb->insert($wpdb->prefix . 'icl_translations', [
+                    'element_type' => 'post_' . $post_type,
+                    'element_id' => $en_post_id,
+                    'trid' => $trid,
+                    'language_code' => $lang_code,
+                    'source_language_code' => 'ar',
+                ]);
+            }
+        }
     }
 
-    wp_send_json_success( [
-        'en_post_id'  => $en_post_id,
-        'en_title'    => $translations['title'] ?? '',
-        'en_edit_url' => get_edit_post_link( $en_post_id ),
-    ] );
+    wp_send_json_success([
+        'en_post_id' => $en_post_id,
+        'en_title' => $translations['title'] ?? '',
+        'en_edit_url' => get_edit_post_link($en_post_id),
+    ]);
 }
