@@ -643,6 +643,20 @@ function erpgulf_gt_settings_render()
                     </td>
                 </tr>
                 <tr>
+                    <th>Rebuild Fitment Index<br><span style="font-weight:normal;color:#888;">( both languages )</span></th>
+                    <td>
+                        <button type="button" id="erpgulf-gt-fitment-btn" class="button button-secondary">
+                            🧩 Rebuild Fitment Index
+                        </button>
+                        <p class="description" style="margin-top:6px;">
+                            Rebuilds <code>wp_adv_product_fitments</code> from every published product's
+                            compatibility — Arabic <strong>and</strong> English — so the vehicle filter works
+                            in both languages. Run after bulk translation, then regenerate the CSV below.
+                        </p>
+                        <div id="erpgulf-gt-fitment-result" style="display:none;margin-top:10px;padding:10px;border-radius:4px;font-size:13px;"></div>
+                    </td>
+                </tr>
+                <tr>
                     <th>Fitment Resync ( Vehicles CSV )</th>
                     <td>
                         <button type="button" id="erpgulf-gt-csv-btn" class="button button-secondary">
@@ -653,6 +667,20 @@ function erpgulf_gt_settings_render()
                             Run after adding or updating any product compatibility data.
                         </p>
                         <div id="erpgulf-gt-csv-result" style="display:none;margin-top:10px;padding:10px;border-radius:4px;font-size:13px;"></div>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Fix English Category Names<br><span style="font-weight:normal;color:#888;">( rename Arabic → English )</span></th>
+                    <td>
+                        <button type="button" id="erpgulf-gt-fixcat-btn" class="button button-secondary">
+                            🏷️ Fix Category Names
+                        </button>
+                        <p class="description" style="margin-top:6px;">
+                            Renames category terms whose English translation was saved as Arabic text
+                            (e.g. "فلتر زيت المحرك" → "Oil Filter"). Name only — products, links and slugs
+                            are untouched. Lists any leftover Arabic-named terms so you can prune or extend the list.
+                        </p>
+                        <div id="erpgulf-gt-fixcat-result" style="display:none;margin-top:10px;padding:10px;border-radius:4px;font-size:13px;"></div>
                     </td>
                 </tr>
                 <tr>
@@ -725,6 +753,72 @@ function erpgulf_gt_settings_render()
                         .html('❌ Network error.');
                 });
             });
+            $('#erpgulf-gt-fitment-btn').on('click', function() {
+                var btn = $(this);
+                if (!confirm('Rebuild the fitment index from all products (Arabic + English)? This truncates and repopulates the table.')) return;
+                btn.prop('disabled', true).text('Rebuilding...');
+                $('#erpgulf-gt-fitment-result').hide();
+                $.post(ajaxurl, {
+                    action: 'erpgulf_gt_rebuild_fitments',
+                    nonce:  '<?php echo esc_js(wp_create_nonce('erpgulf_gt_rebuild_fitments')); ?>'
+                }, function(res) {
+                    btn.prop('disabled', false).text('🧩 Rebuild Fitment Index');
+                    if (res.success) {
+                        $('#erpgulf-gt-fitment-result').show()
+                            .css({'background':'#f0fff4','border':'1px solid #68d391','color':'#276749'})
+                            .html('✅ ' + res.data.message);
+                    } else {
+                        $('#erpgulf-gt-fitment-result').show()
+                            .css({'background':'#fff5f5','border':'1px solid #fc8181','color':'#c53030'})
+                            .html('❌ ' + (res.data || 'Failed.'));
+                    }
+                }).fail(function() {
+                    btn.prop('disabled', false).text('🧩 Rebuild Fitment Index');
+                    $('#erpgulf-gt-fitment-result').show()
+                        .css({'background':'#fff5f5','border':'1px solid #fc8181','color':'#c53030'})
+                        .html('❌ Network error — large catalogs may still be finishing. Recheck the brand counts in a minute; re-run if needed.');
+                });
+            });
+
+            $('#erpgulf-gt-fixcat-btn').on('click', function() {
+                var btn = $(this);
+                if (!confirm('Rename Arabic-named English categories to English? (name only — safe & reversible)')) return;
+                btn.prop('disabled', true).text('Renaming...');
+                $('#erpgulf-gt-fixcat-result').hide();
+                $.post(ajaxurl, {
+                    action: 'erpgulf_gt_fix_en_cat_names',
+                    nonce:  '<?php echo esc_js(wp_create_nonce('erpgulf_gt_fix_en_cat_names')); ?>'
+                }, function(res) {
+                    btn.prop('disabled', false).text('🏷️ Fix Category Names');
+                    if (res.success) {
+                        var d = res.data;
+                        var html = '✅ <b>' + d.renamed + '</b> renamed' + (d.merged ? ', <b>' + d.merged + '</b> merged' : '') + (d.skipped && d.skipped.length ? ', <b>' + d.skipped.length + '</b> skipped' : '') + ' to English.';
+                        if (d.skipped && d.skipped.length) {
+                            html += '<br><span style="color:#c53030;">Skipped — reason:</span><br>';
+                            html += d.skipped.map(function(s){ return '&nbsp;&nbsp;• ' + s.id + ' — ' + s.name + ' → ' + s.why; }).join('<br>');
+                        }
+                        if (d.remaining && d.remaining.length) {
+                            html += '<br><span style="color:#7a5c00;">Still Arabic-named (' + d.remaining.length + ') — prune if 0 products, or tell Claude to add them:</span><br>';
+                            html += d.remaining.map(function(r){ return '&nbsp;&nbsp;• ' + r.id + ' — ' + r.name + ' (' + r.products + ')'; }).join('<br>');
+                        } else {
+                            html += ' No Arabic-named English categories remain.';
+                        }
+                        $('#erpgulf-gt-fixcat-result').show()
+                            .css({'background':'#f0fff4','border':'1px solid #68d391','color':'#276749'})
+                            .html(html);
+                    } else {
+                        $('#erpgulf-gt-fixcat-result').show()
+                            .css({'background':'#fff5f5','border':'1px solid #fc8181','color':'#c53030'})
+                            .html('❌ ' + (res.data || 'Failed.'));
+                    }
+                }).fail(function() {
+                    btn.prop('disabled', false).text('🏷️ Fix Category Names');
+                    $('#erpgulf-gt-fixcat-result').show()
+                        .css({'background':'#fff5f5','border':'1px solid #fc8181','color':'#c53030'})
+                        .html('❌ Network error.');
+                });
+            });
+
             $('#erpgulf-gt-sync-btn').on('click', function() {
                 var btn = $(this);
                 btn.prop('disabled', true).text('Syncing...');
@@ -1252,7 +1346,12 @@ add_action('wp_ajax_erpgulf_gt_translate', 'erpgulf_gt_handle_translate');
 
 function erpgulf_gt_handle_translate()
 {
+    // Suppress PHP warnings from being sent as headers (prevents nginx 502 upstream too big header)
+    $old_error_reporting = error_reporting(0);
+    @ini_set('display_errors', '0');
+
     if (!check_ajax_referer('erpgulf_gt_translate', 'nonce', false)) {
+        error_reporting($old_error_reporting);
         wp_send_json_error('Security check failed.');
     }
     if (!current_user_can('edit_products')) {
@@ -1363,6 +1462,7 @@ function erpgulf_gt_handle_translate()
     $en_post_id = $save_result;
     do_action('erpgulf_gt_after_translate', $post_id, $translations);
 
+    error_reporting($old_error_reporting);
     wp_send_json_success([
         'translated_fields' => $translated_fields,
         'provider_used' => $active_info['label'],
@@ -1440,14 +1540,23 @@ function erpgulf_gt_save_to_wpml(int $ar_post_id, array $translations, string $t
     $ar_post = get_post($ar_post_id);
 
     // Clean up stale WPML EN record (empty element_id) before creating new post
-    $wpdb->query($wpdb->prepare(
-        "DELETE FROM {$wpdb->prefix}icl_translations 
-         WHERE trid = %d 
-         AND language_code = %s 
-         AND element_type = 'post_product'
-         AND (element_id = 0 OR element_id IS NULL OR element_id = '')",
-        $trid, $lang_code
-    ));
+    $trid = apply_filters('wpml_element_trid', null, $ar_post_id, 'post_product');
+    if (!$trid) {
+        $trid = $wpdb->get_var($wpdb->prepare(
+            "SELECT trid FROM {$wpdb->prefix}icl_translations WHERE element_id = %d AND element_type = 'post_product'",
+            $ar_post_id
+        ));
+    }
+    if ($trid) {
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->prefix}icl_translations 
+             WHERE trid = %d 
+             AND language_code = %s 
+             AND element_type = 'post_product'
+             AND (element_id = 0 OR element_id IS NULL OR element_id = '')",
+            $trid, $lang_code
+        ));
+    }
 
     do_action('wpml_switch_language', $lang_code);
 
@@ -1501,6 +1610,9 @@ function erpgulf_gt_save_to_wpml(int $ar_post_id, array $translations, string $t
         ));
     }
 
+    global $wpdb;
+    $wpdb->hide_errors();
+    $wpdb->suppress_errors(true);
     do_action('wpml_set_element_language_details', [
         'element_id' => $new_post_id,
         'element_type' => 'post_product',
@@ -1508,6 +1620,8 @@ function erpgulf_gt_save_to_wpml(int $ar_post_id, array $translations, string $t
         'language_code' => $lang_code,
         'source_language_code' => 'ar',
     ]);
+    $wpdb->suppress_errors(false);
+    $wpdb->show_errors();
 
     if ($trid) {
         $existing = $wpdb->get_var($wpdb->prepare(
@@ -1946,23 +2060,45 @@ function erpgulf_gt_sync_terms(int $from_id, int $to_id, string $lang_code, call
 
 function erpgulf_gt_create_english_term(WP_Term $ar_term, string $lang_code, callable $translate_fn, array $settings, string $source_lang, string $target_lang): int|false
 {
-    $prompt = "Translate this {$source_lang} product category name to {$target_lang}. "
-        . "Return only the translated name. No explanation. No punctuation around it.\n\n"
-        . $ar_term->name;
-
-    $result = $translate_fn($prompt, $settings);
-    if (is_wp_error($result) || empty(trim($result)))
-        return false;
-
-    $en_name = trim($result);
     $taxonomy = $ar_term->taxonomy;
 
+    // 1) SINGLE SOURCE OF TRUTH: if WPML already links this Arabic category to an
+    //    English term, always reuse it. Prevents duplicate terms.
+    $linked = apply_filters('wpml_object_id', $ar_term->term_id, $taxonomy, false, $lang_code);
+    if ($linked && (int) $linked !== (int) $ar_term->term_id) {
+        $linked_term = get_term((int) $linked, $taxonomy);
+        if ($linked_term && !is_wp_error($linked_term)) {
+            return (int) $linked;
+        }
+    }
+
+    // 2) DETERMINISTIC NAME: translate the category name ONCE and cache it on the
+    //    Arabic term. Every product reuses the same name -> no drift, no dupes.
+    $en_name = (string) get_term_meta($ar_term->term_id, '_erpgulf_gt_en_name', true);
+    if ($en_name === '') {
+        $prompt = "Translate this {$source_lang} product category name to {$target_lang}. "
+            . 'Return ONLY the plain category name — no punctuation, no slashes, no arrows (>), '
+            . "no parentheses, no path, no explanation.\n\n"
+            . $ar_term->name;
+        $result = $translate_fn($prompt, $settings);
+        if (is_wp_error($result) || empty(trim((string) $result)))
+            return false;
+        // Strip path/punctuation the AI sometimes adds (e.g. "Engine> Engine Oil Filter").
+        $en_name = trim(preg_replace('/\s+/', ' ', str_replace(['>', '/', '\\', '|'], ' ', (string) $result)));
+        $en_name = trim($en_name, " \t\n\r\0\v-–—:>");
+        if ($en_name === '')
+            return false;
+        update_term_meta($ar_term->term_id, '_erpgulf_gt_en_name', $en_name);
+    }
+
+    // 3) Reuse an existing English term with that exact name.
     $existing = get_term_by('name', $en_name, $taxonomy);
     if ($existing && !is_wp_error($existing)) {
         erpgulf_gt_link_term_to_wpml($existing->term_id, $ar_term->term_id, $taxonomy, $lang_code);
-        return $existing->term_id;
+        return (int) $existing->term_id;
     }
 
+    // 4) Create once, then link.
     $parent_id = 0;
     if ($ar_term->parent) {
         $en_parent_id = apply_filters('wpml_object_id', $ar_term->parent, $taxonomy, false, $lang_code);
@@ -1975,12 +2111,16 @@ function erpgulf_gt_create_english_term(WP_Term $ar_term, string $lang_code, cal
     do_action('wpml_switch_language', ICL_LANGUAGE_CODE);
 
     if (is_wp_error($new_term)) {
-        $new_term = wp_insert_term($en_name, $taxonomy, ['parent' => $parent_id, 'slug' => sanitize_title($en_name) . '-en']);
-        if (is_wp_error($new_term))
-            return false;
+        // Slug/name clash -> reuse that term instead of creating a duplicate.
+        $maybe = get_term_by('name', $en_name, $taxonomy);
+        if ($maybe && !is_wp_error($maybe)) {
+            erpgulf_gt_link_term_to_wpml($maybe->term_id, $ar_term->term_id, $taxonomy, $lang_code);
+            return (int) $maybe->term_id;
+        }
+        return false;
     }
 
-    $new_term_id = $new_term['term_id'];
+    $new_term_id = (int) $new_term['term_id'];
     erpgulf_gt_link_term_to_wpml($new_term_id, $ar_term->term_id, $taxonomy, $lang_code);
     return $new_term_id;
 }
@@ -2826,4 +2966,291 @@ function erpgulf_gt_kit_option_to_english(string $value): string
         'عادم' => 'Exhaust',
     ];
     return $map[$value] ?? $value;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// AJAX — Rebuild fitment index from ALL products (both languages)
+// ─────────────────────────────────────────────────────────────────
+
+add_action('wp_ajax_erpgulf_gt_rebuild_fitments', 'erpgulf_gt_handle_rebuild_fitments');
+
+function erpgulf_gt_handle_rebuild_fitments()
+{
+    if (!check_ajax_referer('erpgulf_gt_rebuild_fitments', 'nonce', false)) {
+        wp_send_json_error('Security check failed.');
+    }
+    if (!current_user_can('manage_woocommerce')) {
+        wp_send_json_error('Insufficient permissions.');
+    }
+
+    @set_time_limit(0);
+    @ini_set('memory_limit', '512M');
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'adv_product_fitments';
+
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table) {
+        wp_send_json_error('Fitment table not found: ' . $table);
+    }
+
+    // Every published product post — both languages (WPML posts share post_type).
+    $product_ids = $wpdb->get_col(
+        "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'product' AND post_status = 'publish'"
+    );
+    if (empty($product_ids)) {
+        wp_send_json_error('No published products found.');
+    }
+
+    // has_arabic is a STORED GENERATED column — never inserted; it fills itself.
+    $wpdb->query("TRUNCATE TABLE {$table}");
+
+    $inserted = 0;
+    $with_compat = 0;
+    $batch = [];
+
+    $flush = function () use (&$batch, $wpdb, $table, &$inserted) {
+        if (!$batch)
+            return;
+        $place = [];
+        $vals = [];
+        foreach ($batch as $r) {
+            $place[] = '(%d,%s,%s,%s,%d)';
+            array_push($vals, $r[0], $r[1], $r[2], $r[3], $r[4]);
+        }
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        $wpdb->query($wpdb->prepare(
+            "INSERT INTO {$table} (product_id,adv_brand,adv_model,adv_variant,adv_year) VALUES " . implode(',', $place),
+            ...$vals
+        ));
+        $inserted += count($batch);
+        $batch = [];
+    };
+
+    foreach ($product_ids as $pid) {
+        $count = (int) get_post_meta($pid, 'add_compactable_details', true);
+        if ($count <= 0)
+            continue;
+        $with_compat++;
+
+        for ($i = 0; $i < $count; $i++) {
+            $brand = trim((string) get_post_meta($pid, "add_compactable_details_{$i}_brand", true));
+            $model = trim((string) get_post_meta($pid, "add_compactable_details_{$i}_model", true));
+            $variant = trim((string) get_post_meta($pid, "add_compactable_details_{$i}_variant", true));
+            $years = (string) get_post_meta($pid, "add_compactable_details_{$i}_years", true);
+
+            if ($brand === '' && $model === '')
+                continue;  // adv_brand/adv_model are NOT NULL
+
+            $year_list = array_filter(array_map('trim', explode(',', $years)));
+            if (!$year_list)
+                $year_list = ['0'];  // adv_year is NOT NULL
+
+            foreach ($year_list as $yr) {
+                $batch[] = [(int) $pid, $brand, $model, $variant, (int) $yr];
+                if (count($batch) >= 500)
+                    $flush();
+            }
+        }
+    }
+    $flush();
+
+    wp_send_json_success([
+        'message' => sprintf(
+            '%s fitment rows rebuilt from %s products (Arabic + English). Now click "Regenerate Vehicles CSV".',
+            number_format($inserted),
+            number_format($with_compat)
+        ),
+    ]);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// AJAX — Sync English product categories from their Arabic originals
+// (batched; dry-run or apply). product_cat only.
+// ─────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────
+// AJAX — Fix Arabic-named English category terms (rename to English).
+// Name only: slug, WPML links, and product assignments are untouched.
+// ─────────────────────────────────────────────────────────────────
+
+add_action('wp_ajax_erpgulf_gt_fix_en_cat_names', 'erpgulf_gt_handle_fix_en_cat_names');
+
+function erpgulf_gt_handle_fix_en_cat_names()
+{
+    if (!check_ajax_referer('erpgulf_gt_fix_en_cat_names', 'nonce', false)) {
+        wp_send_json_error('Security check failed.');
+    }
+    if (!current_user_can('manage_woocommerce')) {
+        wp_send_json_error('Insufficient permissions.');
+    }
+
+    @set_time_limit(0);
+    global $wpdb;
+    $tax = 'product_cat';
+
+    // ── AI setup (same wiring as the translate handler) ──────────────
+    $active_key = erpgulf_gt_active_provider();
+    $translate_fn = 'erpgulf_gt_translate_' . $active_key;
+    if (!function_exists($translate_fn)) {
+        wp_send_json_error("AI provider '{$active_key}' not available.");
+    }
+    $settings = [
+        'gemini_api_key' => get_option('erpgulf_gt_gemini_api_key', ''),
+        'gemini_model' => get_option('erpgulf_gt_gemini_model', 'gemini-2.0-flash'),
+        'openai_api_key' => get_option('erpgulf_gt_openai_api_key', ''),
+        'openai_model' => get_option('erpgulf_gt_openai_model', 'gpt-4o-mini'),
+        'claude_api_key' => get_option('erpgulf_gt_claude_api_key', ''),
+        'claude_model' => get_option('erpgulf_gt_claude_model', 'claude-haiku-4-5-20251001'),
+    ];
+    $source_lang = get_option('erpgulf_gt_source_lang', 'Arabic');
+    $target_lang = get_option('erpgulf_gt_target_lang', 'English');
+    $ar_code = erpgulf_gt_lang_name_to_code($source_lang);
+
+    // ── All English-slot product_cat terms whose NAME is Arabic ─────
+    $terms = $wpdb->get_results(
+        "SELECT e.trid, e.element_id AS en_ttid, en_t.term_id AS en_id, en_t.name AS en_name
+         FROM {$wpdb->prefix}icl_translations e
+         JOIN {$wpdb->term_taxonomy} en_tt ON en_tt.term_taxonomy_id = e.element_id AND en_tt.taxonomy = 'product_cat'
+         JOIN {$wpdb->terms} en_t ON en_t.term_id = en_tt.term_id
+         WHERE e.language_code = 'en' AND e.element_type = 'tax_product_cat'
+           AND en_t.name REGEXP '[؀-ۿ]'
+         ORDER BY en_tt.count DESC"
+    );
+
+    $limit = 25;  // per click; re-click for the rest (cached, so fast)
+    $renamed = 0;
+    $merged = 0;
+    $skipped = [];
+
+    foreach ((array) $terms as $t) {
+        if (($renamed + $merged) >= $limit)
+            break;
+
+        $en_id = (int) $t->en_id;
+        $trid = (int) $t->trid;
+
+        // Find the Arabic source term (same trid) — translate & cache on it.
+        $ar_ttid = $wpdb->get_var($wpdb->prepare(
+            "SELECT element_id FROM {$wpdb->prefix}icl_translations
+             WHERE trid = %d AND language_code = %s AND element_type = 'tax_product_cat' LIMIT 1",
+            $trid, $ar_code
+        ));
+        $ar_term_id = 0;
+        $ar_name = $t->en_name;  // fallback: translate the term's own Arabic name
+        if ($ar_ttid) {
+            $row = $wpdb->get_row($wpdb->prepare(
+                "SELECT t2.term_id, t2.name FROM {$wpdb->term_taxonomy} tt2
+                 JOIN {$wpdb->terms} t2 ON t2.term_id = tt2.term_id
+                 WHERE tt2.term_taxonomy_id = %d",
+                $ar_ttid
+            ));
+            if ($row) {
+                $ar_term_id = (int) $row->term_id;
+                $ar_name = $row->name;
+            }
+        }
+
+        // Cached English name (reuses the translator's own cache key).
+        $cache_term = $ar_term_id ?: $en_id;
+        $english = (string) get_term_meta($cache_term, '_erpgulf_gt_en_name', true);
+        $cache_ok = ($english !== '' &&
+            !preg_match('/[؀-ۿ]/u', $english) &&
+            preg_match('/[A-Za-z]/', $english) &&
+            stripos($english, 'THINK') === false &&
+            mb_strlen($english) <= 60);
+
+        if (!$cache_ok) {
+            $prompt = "Translate this {$source_lang} product category name to {$target_lang}. "
+                . 'Return ONLY the plain English category name — no Arabic, no punctuation, no slashes, '
+                . "no arrows, no parentheses, no quotes, no explanation.\n\n" . $ar_name;
+            $res = $translate_fn($prompt, $settings);
+            if (is_wp_error($res)) {
+                $skipped[] = ['id' => $en_id, 'name' => $t->en_name, 'why' => 'AI: ' . $res->get_error_message()];
+                continue;
+            }
+            $english = (string) $res;
+            $english = str_replace(['>', '/', '\\', '|', '"', "'", '(', ')'], ' ', $english);
+            $english = trim(preg_replace('/\s+/', ' ', $english), " \t\n\r\0\v-–—:>");
+
+            // VALIDATE — must be real English, not Arabic / reasoning / junk.
+            $bad = ($english === '') ||
+                preg_match('/[؀-ۿ]/u', $english) ||  // still Arabic
+                !preg_match('/[A-Za-z]/', $english) ||  // no Latin at all
+                stripos($english, 'THINK') !== false ||  // reasoning leak
+                mb_strlen($english) > 60;  // sentence, not a name
+            if ($bad) {
+                $skipped[] = ['id' => $en_id, 'name' => $t->en_name, 'why' => 'invalid AI output: ' . mb_substr((string) $res, 0, 40)];
+                continue;
+            }
+            update_term_meta($cache_term, '_erpgulf_gt_en_name', $english);
+        }
+
+        // Conflict handling: empty duplicate -> delete; duplicate with products -> merge.
+        $existing = get_terms(['taxonomy' => $tax, 'name' => $english, 'hide_empty' => false]);
+        $conflict = null;
+        if (!is_wp_error($existing)) {
+            foreach ($existing as $ex) {
+                if ((int) $ex->term_id !== $en_id) {
+                    $conflict = $ex;
+                    break;
+                }
+            }
+        }
+
+        if ($conflict && (int) $conflict->count > 0) {
+            $objs = get_objects_in_term($en_id, $tax);
+            if (!is_wp_error($objs)) {
+                foreach ($objs as $oid) {
+                    wp_set_object_terms((int) $oid, [(int) $conflict->term_id], $tax, true);
+                    wp_remove_object_terms((int) $oid, [$en_id], $tax);
+                }
+            }
+            wp_delete_term($en_id, $tax);
+            $merged++;
+            continue;
+        }
+        if ($conflict) {
+            // Empty duplicate -> delete it so the rename won't clash.
+            wp_delete_term((int) $conflict->term_id, $tax);
+        }
+
+        // Fresh, UNIQUE English slug. The current slug is the URL-encoded Arabic name
+        // and collides with a duplicate term, which blocks a name-only update.
+        $base_slug = sanitize_title($english);
+        if ($base_slug === '')
+            $base_slug = 'cat-' . $en_id;
+        $slug = $base_slug;
+        $n = 2;
+        while (($clash = get_term_by('slug', $slug, $tax)) && (int) $clash->term_id !== $en_id) {
+            $slug = $base_slug . '-' . $n;
+            if (++$n > 50) {
+                $slug = $base_slug . '-' . $en_id;
+                break;
+            }
+        }
+
+        $r = wp_update_term($en_id, $tax, ['name' => $english, 'slug' => $slug]);
+        if (!is_wp_error($r)) {
+            $renamed++;
+        } else {
+            $skipped[] = ['id' => $en_id, 'name' => $t->en_name, 'why' => $r->get_error_message()];
+        }
+    }
+
+    // Remaining Arabic-named English-slot terms after this run.
+    $remaining = $wpdb->get_results(
+        "SELECT en_t.term_id AS id, en_t.name AS name, en_tt.count AS products
+         FROM {$wpdb->prefix}icl_translations e
+         JOIN {$wpdb->term_taxonomy} en_tt ON en_tt.term_taxonomy_id = e.element_id AND en_tt.taxonomy = 'product_cat'
+         JOIN {$wpdb->terms} en_t ON en_t.term_id = en_tt.term_id
+         WHERE e.language_code = 'en' AND e.element_type = 'tax_product_cat'
+           AND en_t.name REGEXP '[؀-ۿ]'
+         ORDER BY en_tt.count DESC"
+    );
+    $rows = [];
+    foreach ((array) $remaining as $r) {
+        $rows[] = ['id' => (int) $r->id, 'name' => $r->name, 'products' => (int) $r->products];
+    }
+
+    wp_send_json_success(['renamed' => $renamed, 'merged' => $merged, 'skipped' => $skipped, 'remaining' => $rows]);
 }
