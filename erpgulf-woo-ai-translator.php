@@ -49,6 +49,9 @@ require_once plugin_dir_path(__FILE__) . 'gemini-provider.php';
 require_once plugin_dir_path(__FILE__) . 'openai-provider.php';
 require_once plugin_dir_path(__FILE__) . 'claude-provider.php';
 require_once plugin_dir_path(__FILE__) . 'erpgulf-gt-pages.php';
+require_once plugin_dir_path(__FILE__) . 'erpgulf-gt-rest.php';
+require_once plugin_dir_path(__FILE__) . 'erpgulf-gt-rest.php';
+require_once plugin_dir_path(__FILE__) . 'erpgulf-gt-translation.php';
 
 // ─────────────────────────────────────────────────────────────────
 // PROVIDER REGISTRY
@@ -403,7 +406,7 @@ function erpgulf_gt_settings_render()
         update_option('erpgulf_gt_fields', array_map('sanitize_text_field', (array) ($_POST['gt_fields'] ?? [])));
         update_option('erpgulf_gt_source_lang', sanitize_text_field(trim($_POST['gt_source_lang'] ?? 'Arabic')));
         update_option('erpgulf_gt_target_lang', sanitize_text_field(trim($_POST['gt_target_lang'] ?? 'English')));
-
+        update_option('erpgulf_gt_auto_enable', isset($_POST['gt_auto_enable']) ? 1 : 0);
         foreach ($registry as $key => $info) {
             if (isset($_POST["gt_{$key}_api_key"])) {
                 update_option($info['key_option'], sanitize_text_field(trim($_POST["gt_{$key}_api_key"])));
@@ -494,6 +497,16 @@ function erpgulf_gt_settings_render()
                                    value="<?php echo esc_attr($target_lang); ?>"
                                    class="regular-text" placeholder="English">
                             <p class="description">Must match your WPML language name.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Auto-process on ERP sync</th>
+                        <td>
+                            <label>
+                                <input type="checkbox" name="gt_auto_enable" value="1" <?php checked((bool) get_option('erpgulf_gt_auto_enable', 1)); ?>>
+                                When a product is created or updated (e.g. by the ERP sync), automatically translate it, build/overwrite the <?php echo esc_html($target_lang); ?> twin, sync all fields, rebuild its fitment, and refresh the vehicles CSV — in the background, no manual clicking.
+                            </label>
+                            <p class="description" style="color:#b7791f;">One AI translation per product on every update. On large bulk syncs, watch your provider's rate limits / cost.</p>
                         </td>
                     </tr>
                 </table>
@@ -1493,6 +1506,23 @@ function erpgulf_gt_save_to_wpml(int $ar_post_id, array $translations, string $t
         $en_post_id = null;
     }
 
+    // ── IDEMPOTENCY GUARD (root-cause fix for duplicate EN twins) ──────────
+    // If WPML has no usable link, fall back to the SKU: reuse an existing live
+    // EN-language product with the same SKU instead of inserting a new one, and
+    // make sure it is WPML-linked so the next run resolves cleanly. Without this,
+    // an unlinked twin (trid NULL) is invisible to wpml_object_id and a brand-new
+    // duplicate is created on every sync.
+    if (!$en_post_id || $en_post_id === $ar_post_id) {
+        $ar_sku = (string) get_post_meta($ar_post_id, '_sku', true);
+        if ($ar_sku !== '') {
+            $found_en = erpgulf_gt_find_product_by_sku_lang($ar_sku, $lang_code, $ar_post_id);
+            if ($found_en) {
+                erpgulf_gt_ensure_wpml_link($ar_post_id, $found_en, $lang_code);
+                $en_post_id = $found_en;
+            }
+        }
+    }
+
     if ($en_post_id && $en_post_id !== $ar_post_id) {
         $update_args = ['ID' => $en_post_id];
         // if ( isset( $translations['title'] ) )   $update_args['post_title']   = $translations['title'];
@@ -1601,56 +1631,9 @@ function erpgulf_gt_save_to_wpml(int $ar_post_id, array $translations, string $t
     erpgulf_gt_sync_woo_fields($ar_post_id, $new_post_id, true);
     erpgulf_gt_sync_terms($ar_post_id, $new_post_id, $lang_code, $translate_fn, $settings);
 
-    $trid = apply_filters('wpml_element_trid', null, $ar_post_id, 'post_product');
-
-    if (!$trid) {
-        $trid = $wpdb->get_var($wpdb->prepare(
-            "SELECT trid FROM {$wpdb->prefix}icl_translations WHERE element_id = %d AND element_type = 'post_product'",
-            $ar_post_id
-        ));
-    }
-
-    global $wpdb;
-    $wpdb->hide_errors();
-    $wpdb->suppress_errors(true);
-    do_action('wpml_set_element_language_details', [
-        'element_id' => $new_post_id,
-        'element_type' => 'post_product',
-        'trid' => $trid,
-        'language_code' => $lang_code,
-        'source_language_code' => 'ar',
-    ]);
-    $wpdb->suppress_errors(false);
-    $wpdb->show_errors();
-
-    if ($trid) {
-        $existing = $wpdb->get_var($wpdb->prepare(
-            "SELECT translation_id FROM {$wpdb->prefix}icl_translations WHERE element_id = %d AND element_type = 'post_product'",
-            $new_post_id
-        ));
-        // Also check for empty element_id record (stale WPML entry)
-        if (!$existing) {
-            $existing = $wpdb->get_var($wpdb->prepare(
-                "SELECT translation_id FROM {$wpdb->prefix}icl_translations WHERE trid = %d AND language_code = %s AND element_type = 'post_product' AND (element_id = 0 OR element_id IS NULL OR element_id = '')",
-                $trid, $lang_code
-            ));
-        }
-        if (!$existing) {
-            $wpdb->insert($wpdb->prefix . 'icl_translations', [
-                'element_type' => 'post_product',
-                'element_id' => $new_post_id,
-                'trid' => $trid,
-                'language_code' => $lang_code,
-                'source_language_code' => 'ar',
-            ]);
-        } else {
-            $wpdb->update(
-                $wpdb->prefix . 'icl_translations',
-                ['trid' => $trid, 'language_code' => $lang_code, 'source_language_code' => 'ar'],
-                ['translation_id' => $existing]
-            );
-        }
-    }
+    // Always link — creates a trid for the AR original if it lacks one, so the
+    // EN twin can never end up unlinked (which is what created the orphans).
+    erpgulf_gt_ensure_wpml_link($ar_post_id, $new_post_id, $lang_code);
 
     erpgulf_gt_copy_kit_variants($ar_post_id, $new_post_id);
 
@@ -2712,9 +2695,18 @@ function erpgulf_gt_branch_stock_sync($meta_id, $post_id, $meta_key, $meta_value
 {
     $watch = (
         strpos($meta_key, 'branch_stock') !== false ||
-        $meta_key === 'mark_spare_part' ||
-        $meta_key === 'kit_variants' ||
-        $meta_key === 'part_of_kit'
+        in_array($meta_key, [
+            'mark_spare_part',
+            'kit_variants',
+            'part_of_kit',
+            '_price',
+            '_regular_price',
+            '_sale_price',
+            '_stock',
+            '_stock_status',
+            '_manage_stock',
+            '_backorders',
+        ], true)
     );
     if (!$watch)
         return;
@@ -2848,7 +2840,7 @@ function erpgulf_gt_copy_kit_variants(int $from_id, int $to_id): void
         get_option('erpgulf_gt_target_lang', 'English')
     );
     for ($i = 0; $i < (int) $count; $i++) {
-        foreach (['option_position', 'option_side', 'option_type', 'option_pack_size', 'variant_product'] as $sub) {
+        foreach (['option_position', 'option_side', 'option_type', 'option_pack_size', 'qty', 'variant_product'] as $sub) {
             $key = "kit_variants_{$i}_{$sub}";
             $value = get_post_meta($from_id, $key, true);
             // Skip empty variant_product only — always copy other fields (even empty) to clear stale values
@@ -3253,4 +3245,446 @@ function erpgulf_gt_handle_fix_en_cat_names()
     }
 
     wp_send_json_success(['renamed' => $renamed, 'merged' => $merged, 'skipped' => $skipped, 'remaining' => $rows]);
+}
+
+// ═════════════════════════════════════════════════════════════════
+// AUTO PIPELINE — on every ERP sync of a product, in the background:
+//   translate -> build/overwrite English twin -> sync fields ->
+//   copy compatibility -> rebuild fitment (AR+EN) -> refresh vehicles CSV
+// Non-blocking (Action Scheduler / WP-Cron), loop-guarded, with rate-limit backoff.
+// ═════════════════════════════════════════════════════════════════
+
+add_action('woocommerce_new_product', 'erpgulf_gt_auto_on_save', 20, 1);
+add_action('woocommerce_update_product', 'erpgulf_gt_auto_on_save', 20, 1);
+add_action('save_post_product', function ($pid) {
+    if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE)
+        return;
+    if (wp_is_post_revision($pid) || wp_is_post_autosave($pid))
+        return;
+    erpgulf_gt_auto_on_save($pid);
+}, 30, 1);
+
+function erpgulf_gt_auto_on_save($product_id)
+{
+    static $seen = [];
+    $product_id = (int) $product_id;
+    if (!$product_id || isset($seen[$product_id]))
+        return;
+    $seen[$product_id] = true;
+
+    if (!apply_filters('erpgulf_gt_auto_enable', (bool) get_option('erpgulf_gt_auto_enable', 1)))
+        return;
+    if (!defined('ICL_LANGUAGE_CODE'))
+        return;
+
+    $post = get_post($product_id);
+    if (!$post || $post->post_type !== 'product')
+        return;
+    if (in_array($post->post_status, ['trash', 'auto-draft'], true))
+        return;
+
+    $src = erpgulf_gt_lang_name_to_code(get_option('erpgulf_gt_source_lang', 'Arabic'));
+    $lang = apply_filters('wpml_element_language_code', null, ['element_id' => $product_id, 'element_type' => 'post_product']);
+    if ($lang && $lang !== $src)
+        return;
+
+    $delay = (int) apply_filters('erpgulf_gt_auto_delay', 60);
+    if (function_exists('as_schedule_single_action')) {
+        if (!as_next_scheduled_action('erpgulf_gt_auto_run', [$product_id], 'erpgulf-gt')) {
+            as_schedule_single_action(time() + $delay, 'erpgulf_gt_auto_run', [$product_id], 'erpgulf-gt');
+        }
+    } elseif (!wp_next_scheduled('erpgulf_gt_auto_run', [$product_id])) {
+        wp_schedule_single_event(time() + $delay, 'erpgulf_gt_auto_run', [$product_id]);
+    }
+}
+
+add_action('erpgulf_gt_auto_run', 'erpgulf_gt_auto_run', 10, 1);
+
+function erpgulf_gt_auto_run($product_id)
+{
+    $product_id = (int) $product_id;
+    $post = get_post($product_id);
+    if (!$post || $post->post_type !== 'product')
+        return;
+
+    @set_time_limit(0);
+    $old_er = error_reporting(0);
+
+    $source_lang = get_option('erpgulf_gt_source_lang', 'Arabic');
+    $target_lang = get_option('erpgulf_gt_target_lang', 'English');
+    $tgt_code = erpgulf_gt_lang_name_to_code($target_lang);
+    $fields = (array) apply_filters('erpgulf_gt_fields', get_option('erpgulf_gt_fields', ['title', 'content', 'excerpt']), $product_id);
+
+    // ── Change detection: do expensive work only when relevant data changed ──
+    $sig = '';
+    foreach ($fields as $field) {
+        if (str_starts_with($field, 'repeater:')) {
+            $rk = preg_replace('/^repeater:/', '', $field);
+            $sig .= '|R:' . $rk . '=' . get_post_meta($product_id, $rk, true);
+            continue;
+        }
+        if ($field === 'title')
+            $sig .= '|T=' . $post->post_title;
+        elseif ($field === 'content')
+            $sig .= '|C=' . $post->post_content;
+        elseif ($field === 'excerpt')
+            $sig .= '|E=' . $post->post_excerpt;
+        else
+            $sig .= '|M=' . get_post_meta($product_id, preg_replace('/^meta:/', '', $field), true);
+    }
+    $text_hash = md5($sig);
+    $last_text = (string) get_post_meta($product_id, '_erpgulf_gt_text_hash', true);
+
+    $compat_sig = (string) get_post_meta($product_id, 'add_compactable_details', true);
+    $cc = (int) $compat_sig;
+    for ($i = 0; $i < $cc; $i++) {
+        foreach (['brand', 'model', 'variant', 'years'] as $s) {
+            $compat_sig .= '|' . get_post_meta($product_id, "add_compactable_details_{$i}_{$s}", true);
+        }
+    }
+    $compat_hash = md5($compat_sig);
+    $last_compat = (string) get_post_meta($product_id, '_erpgulf_gt_compat_hash', true);
+
+    $price_hash = md5(
+        get_post_meta($product_id, '_price', true) . '|'
+        . get_post_meta($product_id, '_regular_price', true) . '|'
+        . get_post_meta($product_id, '_sale_price', true)
+    );
+    $stock_hash = md5(
+        get_post_meta($product_id, '_stock', true) . '|'
+        . get_post_meta($product_id, '_stock_status', true) . '|'
+        . get_post_meta($product_id, '_manage_stock', true) . '|'
+        . get_post_meta($product_id, 'branch_stock', true)
+    );
+    $last_price = (string) get_post_meta($product_id, '_erpgulf_gt_price_hash', true);
+    $last_stock = (string) get_post_meta($product_id, '_erpgulf_gt_stock_hash', true);
+
+    $en_id = apply_filters('wpml_object_id', $product_id, 'product', false, $tgt_code);
+    $en_live = $en_id && !in_array(get_post_status($en_id), [false, 'trash', 'auto-draft'], true);
+
+    $text_changed = (!$en_live) || ($text_hash !== $last_text);
+    $compat_changed = ($compat_hash !== $last_compat);
+
+    // Stock/price-only update (nothing translatable or fitment-related changed) -> skip, log the real reason.
+    if (!$text_changed && !$compat_changed) {
+        $changed = [];
+        if ($last_price !== '' && $price_hash !== $last_price)
+            $changed[] = 'price';
+        if ($last_stock !== '' && $stock_hash !== $last_stock)
+            $changed[] = 'stock';
+        $reason = !empty($changed)
+            ? (implode(' + ', $changed) . ' changed — mirrored to English; text & compatibility unchanged, no re-translation needed')
+            : 'no change detected (identical re-save) — nothing to do';
+        update_post_meta($product_id, '_erpgulf_gt_price_hash', $price_hash);
+        update_post_meta($product_id, '_erpgulf_gt_stock_hash', $stock_hash);
+        erpgulf_gt_log($product_id, 'skip', $reason);
+        error_reporting($old_er);
+        return;
+    }
+
+    $fitment_touched = false;
+
+    // Fitment for the Arabic product — only when compatibility changed.
+    if ($compat_changed) {
+        erpgulf_gt_fitment_reindex_product($product_id);
+        $fitment_touched = true;
+    }
+
+    // Translation — only when text changed (or the English twin is missing).
+    if ($text_changed) {
+        $registry = erpgulf_gt_ai_providers();
+        $active_key = erpgulf_gt_active_provider();
+        $active_info = isset($registry[$active_key]) ? $registry[$active_key] : null;
+        $translate_fn = 'erpgulf_gt_translate_' . $active_key;
+
+        if (!$active_info || !function_exists($translate_fn) || empty(get_option($active_info['key_option'], ''))) {
+            erpgulf_gt_log($product_id, 'skipped', 'No API key / provider (text change not translated)');
+        } else {
+            $settings = [
+                'gemini_api_key' => get_option('erpgulf_gt_gemini_api_key', ''),
+                'gemini_model' => get_option('erpgulf_gt_gemini_model', 'gemini-2.0-flash'),
+                'openai_api_key' => get_option('erpgulf_gt_openai_api_key', ''),
+                'openai_model' => get_option('erpgulf_gt_openai_model', 'gpt-4o-mini'),
+                'claude_api_key' => get_option('erpgulf_gt_claude_api_key', ''),
+                'claude_model' => get_option('erpgulf_gt_claude_model', 'claude-haiku-4-5-20251001'),
+            ];
+            $translations = [];
+            $api_error = false;
+
+            foreach ($fields as $field) {
+                if (str_starts_with($field, 'repeater:')) {
+                    $rk = preg_replace('/^repeater:/', '', $field);
+                    $res = erpgulf_gt_translate_repeater($product_id, $rk, $translate_fn, $settings, $source_lang, $target_lang);
+                    if (!is_wp_error($res))
+                        $translations[$field] = $res;
+                    continue;
+                }
+                if ($field === 'title')
+                    $text = $post->post_title;
+                elseif ($field === 'content')
+                    $text = $post->post_content;
+                elseif ($field === 'excerpt')
+                    $text = $post->post_excerpt;
+                else
+                    $text = (string) get_post_meta($product_id, preg_replace('/^meta:/', '', $field), true);
+
+                if (trim((string) $text) === '')
+                    continue;
+
+                $prompt = "Translate the following {$source_lang} product text to {$target_lang}. "
+                    . 'Return only the translated text. No explanation. No quotes. No preamble. '
+                    . "Preserve any HTML tags exactly as they are.\n\n{$text}";
+                $prompt = (string) apply_filters('erpgulf_gt_prompt', $prompt, $field, $text, $product_id);
+                $result = $translate_fn($prompt, $settings);
+                if (is_wp_error($result)) {
+                    $api_error = true;
+                    continue;
+                }
+                $translations[$field] = (string) apply_filters('erpgulf_gt_translated_text', $result, $text, $field, $product_id);
+            }
+
+            if ($api_error && empty($translations)) {
+                erpgulf_gt_log($product_id, 'retry', 'AI provider failed (rate limit?) — backing off');
+                erpgulf_gt_auto_retry($product_id);
+                if ($fitment_touched && function_exists('erpgulf_gt_generate_vehicles_csv'))
+                    erpgulf_gt_generate_vehicles_csv();
+                error_reporting($old_er);
+                return;
+            }
+
+            if (!empty($translations)) {
+                do_action('erpgulf_gt_before_translate', $product_id);
+                $save = erpgulf_gt_save_to_wpml($product_id, $translations, $target_lang, $translate_fn, $settings);
+                if (is_wp_error($save)) {
+                    erpgulf_gt_log($product_id, 'error', 'save_to_wpml: ' . $save->get_error_message());
+                } else {
+                    delete_post_meta($product_id, '_erpgulf_gt_auto_tries');
+                    $en_id = (int) $save;
+
+                    $compat_count = get_post_meta($product_id, 'add_compactable_details', true);
+                    if ($compat_count !== '' && $en_id) {
+                        update_post_meta($en_id, 'add_compactable_details', (int) $compat_count);
+                        $ref = get_post_meta($product_id, '_add_compactable_details', true);
+                        if ($ref)
+                            update_post_meta($en_id, '_add_compactable_details', $ref);
+                        for ($i = 0; $i < (int) $compat_count; $i++) {
+                            foreach (['brand', 'model', 'variant', 'years', 'engine_size'] as $sub) {
+                                $k = "add_compactable_details_{$i}_{$sub}";
+                                $v = get_post_meta($product_id, $k, true);
+                                if ($v !== '')
+                                    update_post_meta($en_id, $k, $v);
+                                $sr = get_post_meta($product_id, '_' . $k, true);
+                                if ($sr)
+                                    update_post_meta($en_id, '_' . $k, $sr);
+                            }
+                        }
+                        erpgulf_gt_fitment_reindex_product($en_id);
+                        $fitment_touched = true;
+                    }
+
+                    update_post_meta($product_id, '_erpgulf_gt_text_hash', $text_hash);
+                    erpgulf_gt_log($product_id, 'ok', 'EN #' . $en_id . ' — fields: ' . implode(', ', array_keys($translations)));
+                    do_action('erpgulf_gt_after_translate', $product_id, $translations);
+                }
+            }
+        }
+    } elseif ($compat_changed && $en_live) {
+        // Compatibility changed but text didn't -> mirror compat + reindex EN, no AI.
+        $compat_count = get_post_meta($product_id, 'add_compactable_details', true);
+        if ($compat_count !== '') {
+            update_post_meta((int) $en_id, 'add_compactable_details', (int) $compat_count);
+            $ref = get_post_meta($product_id, '_add_compactable_details', true);
+            if ($ref)
+                update_post_meta((int) $en_id, '_add_compactable_details', $ref);
+            for ($i = 0; $i < (int) $compat_count; $i++) {
+                foreach (['brand', 'model', 'variant', 'years', 'engine_size'] as $sub) {
+                    $k = "add_compactable_details_{$i}_{$sub}";
+                    $v = get_post_meta($product_id, $k, true);
+                    if ($v !== '')
+                        update_post_meta((int) $en_id, $k, $v);
+                    $sr = get_post_meta($product_id, '_' . $k, true);
+                    if ($sr)
+                        update_post_meta((int) $en_id, '_' . $k, $sr);
+                }
+            }
+            erpgulf_gt_fitment_reindex_product((int) $en_id);
+        }
+        erpgulf_gt_log($product_id, 'ok', 'Compatibility changed — fitment rebuilt (no re-translation)');
+    }
+
+    update_post_meta($product_id, '_erpgulf_gt_compat_hash', $compat_hash);
+    update_post_meta($product_id, '_erpgulf_gt_price_hash', $price_hash);
+    update_post_meta($product_id, '_erpgulf_gt_stock_hash', $stock_hash);
+
+    if ($fitment_touched && function_exists('erpgulf_gt_generate_vehicles_csv'))
+        erpgulf_gt_generate_vehicles_csv();
+
+    error_reporting($old_er);
+}
+
+function erpgulf_gt_auto_retry($product_id)
+{
+    $product_id = (int) $product_id;
+    $tries = (int) get_post_meta($product_id, '_erpgulf_gt_auto_tries', true);
+    if ($tries >= 5) {
+        delete_post_meta($product_id, '_erpgulf_gt_auto_tries');
+        return;
+    }
+    update_post_meta($product_id, '_erpgulf_gt_auto_tries', $tries + 1);
+    $delay = 300 * ($tries + 1);
+    if (function_exists('as_schedule_single_action')) {
+        as_schedule_single_action(time() + $delay, 'erpgulf_gt_auto_run', [$product_id], 'erpgulf-gt');
+    } else {
+        wp_schedule_single_event(time() + $delay, 'erpgulf_gt_auto_run', [$product_id]);
+    }
+}
+
+function erpgulf_gt_fitment_reindex_product($product_id)
+{
+    global $wpdb;
+    $product_id = (int) $product_id;
+    if (!$product_id)
+        return;
+    $table = $wpdb->prefix . 'adv_product_fitments';
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table)
+        return;
+
+    $wpdb->delete($table, ['product_id' => $product_id], ['%d']);
+
+    $count = (int) get_post_meta($product_id, 'add_compactable_details', true);
+    if ($count <= 0)
+        return;
+
+    $rows = [];
+    for ($i = 0; $i < $count; $i++) {
+        $brand = trim((string) get_post_meta($product_id, "add_compactable_details_{$i}_brand", true));
+        $model = trim((string) get_post_meta($product_id, "add_compactable_details_{$i}_model", true));
+        $variant = trim((string) get_post_meta($product_id, "add_compactable_details_{$i}_variant", true));
+        $years = (string) get_post_meta($product_id, "add_compactable_details_{$i}_years", true);
+        if ($brand === '' && $model === '')
+            continue;
+        $yl = array_filter(array_map('trim', explode(',', $years)));
+        if (!$yl)
+            $yl = ['0'];
+        foreach ($yl as $yr)
+            $rows[] = [$product_id, $brand, $model, $variant, (int) $yr];
+    }
+    if (!$rows)
+        return;
+
+    $ph = [];
+    $vals = [];
+    foreach ($rows as $r) {
+        $ph[] = '(%d,%s,%s,%s,%d)';
+        array_push($vals, $r[0], $r[1], $r[2], $r[3], $r[4]);
+    }
+    $wpdb->query($wpdb->prepare("INSERT INTO {$table} (product_id,adv_brand,adv_model,adv_variant,adv_year) VALUES " . implode(',', $ph), ...$vals));
+}
+
+function erpgulf_gt_log($product_id, $status, $detail = '')
+{
+    $product_id = (int) $product_id;
+    $ts = current_time('mysql');
+
+    // Per-product stamp — check one product's last run at a glance.
+    update_post_meta($product_id, '_erpgulf_gt_auto_status', $status);
+    update_post_meta($product_id, '_erpgulf_gt_auto_time', $ts);
+    update_post_meta($product_id, '_erpgulf_gt_auto_detail', mb_substr((string) $detail, 0, 300));
+
+    // Rolling log — last 200 runs, newest first.
+    $log = get_option('erpgulf_gt_log', []);
+    if (!is_array($log))
+        $log = [];
+    array_unshift($log, [
+        't' => $ts,
+        'id' => $product_id,
+        'sku' => get_post_meta($product_id, '_sku', true),
+        's' => $status,
+        'd' => mb_substr((string) $detail, 0, 300),
+    ]);
+    update_option('erpgulf_gt_log', array_slice($log, 0, 200), false);
+
+    // PHP error log (needs WP_DEBUG_LOG on to persist to debug.log).
+    error_log(sprintf('[ERPGulf GT] #%d %s — %s', $product_id, $status, $detail));
+}
+
+// ── ROOT-CAUSE FIX HELPERS ────────────────────────────────────────────────
+
+/**
+ * Find a live product in $lang_code with the given SKU (excluding $exclude_id).
+ * Prefers a properly WPML-linked product; will also adopt an unlinked orphan.
+ */
+function erpgulf_gt_find_product_by_sku_lang(string $sku, string $lang_code, int $exclude_id = 0): int
+{
+    global $wpdb;
+    if ($sku === '')
+        return 0;
+    $id = $wpdb->get_var($wpdb->prepare(
+        "SELECT p.ID
+         FROM {$wpdb->posts} p
+         JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = '_sku' AND pm.meta_value = %s
+         LEFT JOIN {$wpdb->prefix}icl_translations t
+                ON t.element_id = p.ID AND t.element_type = 'post_product'
+         WHERE p.post_type = 'product' AND p.post_status = 'publish' AND p.ID <> %d
+           AND (t.language_code = %s OR t.trid IS NULL)
+         ORDER BY (t.language_code = %s) DESC, (t.trid IS NOT NULL) DESC, p.ID ASC
+         LIMIT 1",
+        $sku, $exclude_id, $lang_code, $lang_code
+    ));
+    return $id ? (int) $id : 0;
+}
+
+/**
+ * Guarantee the AR original has a trid, then upsert the EN row on that trid.
+ * This is the write the old code skipped when the AR trid was missing.
+ */
+function erpgulf_gt_ensure_wpml_link(int $ar_id, int $en_id, string $lang_code): void
+{
+    global $wpdb;
+    if (!$ar_id || !$en_id || $ar_id === $en_id)
+        return;
+    $icl = $wpdb->prefix . 'icl_translations';
+
+    // 1) AR must have a trid. Register it as the source if missing.
+    $trid = $wpdb->get_var($wpdb->prepare(
+        "SELECT trid FROM {$icl} WHERE element_id = %d AND element_type = 'post_product'", $ar_id
+    ));
+    if (!$trid) {
+        do_action('wpml_set_element_language_details', [
+            'element_id' => $ar_id,
+            'element_type' => 'post_product',
+            'trid' => null,
+            'language_code' => 'ar',
+            'source_language_code' => null,
+        ]);
+        $trid = $wpdb->get_var($wpdb->prepare(
+            "SELECT trid FROM {$icl} WHERE element_id = %d AND element_type = 'post_product'", $ar_id
+        ));
+    }
+    if (!$trid)
+        return;  // WPML unavailable — bail rather than create an unlinked twin
+
+    // 2) Upsert the EN translation row on that trid.
+    $existing = $wpdb->get_var($wpdb->prepare(
+        "SELECT translation_id FROM {$icl} WHERE element_id = %d AND element_type = 'post_product'", $en_id
+    ));
+    if ($existing) {
+        $wpdb->update($icl,
+            ['trid' => $trid, 'language_code' => $lang_code, 'source_language_code' => 'ar'],
+            ['translation_id' => $existing]);
+        return;
+    }
+    // clear any stale empty-element row on this trid/lang, then insert
+    $wpdb->query($wpdb->prepare(
+        "DELETE FROM {$icl} WHERE trid = %d AND language_code = %s AND element_type = 'post_product'
+         AND (element_id = 0 OR element_id IS NULL OR element_id = '')",
+        $trid, $lang_code
+    ));
+    $wpdb->insert($icl, [
+        'element_type' => 'post_product',
+        'element_id' => $en_id,
+        'trid' => $trid,
+        'language_code' => $lang_code,
+        'source_language_code' => 'ar',
+    ]);
 }
