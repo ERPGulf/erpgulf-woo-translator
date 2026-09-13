@@ -295,31 +295,68 @@ function erpgulf_gt_rest_rebuild_fitments_core(): array
         $batch = [];
     };
 
-    foreach ($product_ids as $pid) {
-        $count = (int) get_post_meta($pid, 'add_compactable_details', true);
-        if ($count <= 0)
-            continue;
-        $with_compat++;
+    /*
+     * Read compatibility meta in chunks with direct SQL rather than
+     * get_post_meta() per key. get_post_meta caches every post's whole meta set
+     * for the life of the request and never releases it, which is unaffordable
+     * across 3000+ products. One query per 500 products keeps memory flat.
+     */
+    foreach (array_chunk($product_ids, 500) as $chunk) {
+        $ids_in = implode(',', array_map('intval', $chunk));
 
-        for ($i = 0; $i < $count; $i++) {
-            $brand = trim((string) get_post_meta($pid, "add_compactable_details_{$i}_brand", true));
-            $model = trim((string) get_post_meta($pid, "add_compactable_details_{$i}_model", true));
-            $variant = trim((string) get_post_meta($pid, "add_compactable_details_{$i}_variant", true));
-            $years = (string) get_post_meta($pid, "add_compactable_details_{$i}_years", true);
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        $meta_rows = $wpdb->get_results(
+            "SELECT post_id, meta_key, meta_value
+               FROM {$wpdb->postmeta}
+              WHERE post_id IN ({$ids_in})
+                AND meta_key LIKE 'add_compactable_details%'",
+            ARRAY_A
+        );
 
-            if ($brand === '' && $model === '')
-                continue;  // adv_brand / adv_model are NOT NULL
+        $meta = [];
+        foreach ($meta_rows as $mr) {
+            $meta[(int) $mr['post_id']][$mr['meta_key']] = $mr['meta_value'];
+        }
+        unset($meta_rows);
 
-            $year_list = array_filter(array_map('trim', explode(',', $years)));
-            if (!$year_list)
-                $year_list = ['0'];  // adv_year is NOT NULL
+        foreach ($chunk as $pid) {
+            $pid = (int) $pid;
+            if (empty($meta[$pid])) {
+                continue;
+            }
+            $m = $meta[$pid];
 
-            foreach ($year_list as $yr) {
-                $batch[] = [(int) $pid, $brand, $model, $variant, (int) $yr];
-                if (count($batch) >= 500)
-                    $flush();
+            $count = (int) ($m['add_compactable_details'] ?? 0);
+            if ($count <= 0) {
+                continue;
+            }
+            $with_compat++;
+
+            for ($i = 0; $i < $count; $i++) {
+                $brand = trim((string) ($m["add_compactable_details_{$i}_brand"] ?? ''));
+                $model = trim((string) ($m["add_compactable_details_{$i}_model"] ?? ''));
+                $variant = trim((string) ($m["add_compactable_details_{$i}_variant"] ?? ''));
+                $years = (string) ($m["add_compactable_details_{$i}_years"] ?? '');
+
+                if ($brand === '' && $model === '') {
+                    continue;  // adv_brand / adv_model are NOT NULL
+                }
+
+                $year_list = array_filter(array_map('trim', explode(',', $years)));
+                if (!$year_list) {
+                    $year_list = ['0'];  // adv_year is NOT NULL
+                }
+
+                foreach ($year_list as $yr) {
+                    $batch[] = [$pid, $brand, $model, $variant, (int) $yr];
+                    if (count($batch) >= 500) {
+                        $flush();
+                    }
+                }
             }
         }
+
+        unset($meta);
     }
     $flush();
 

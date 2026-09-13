@@ -476,7 +476,7 @@ function erpgulf_gt_settings_render()
                 </div>
             </div>
 
-            <!-- ── Translation Direction ── -->
+            {{!-- ── Translation Direction ── --}}
             <div style="background:#fff;padding:20px;border:1px solid #ccd0d4;border-radius:4px;margin-bottom:20px;">
                 <h3 style="margin-top:0;">🌐 Translation Direction</h3>
                 <table class="form-table" style="margin-top:0;">
@@ -511,7 +511,7 @@ function erpgulf_gt_settings_render()
                 </table>
             </div>
 
-            <!-- ── Fields to Translate ── -->
+            {{!-- ── Fields to Translate ── --}}
             <div style="background:#fff;padding:20px;border:1px solid #ccd0d4;border-radius:4px;margin-bottom:20px;">
                 <h3 style="margin-top:0;">📋 Fields to Translate</h3>
                 <p style="color:#666;font-size:13px;margin-top:0;">
@@ -559,7 +559,7 @@ function erpgulf_gt_settings_render()
                 <?php endif; ?>
             </div>
 
-            <!-- ── Credentials per provider ── -->
+            {{!-- ── Credentials per provider ── --}}
             <?php
             foreach ($registry as $key => $info):
                 $saved_key = get_option($info['key_option'], '');
@@ -636,7 +636,7 @@ function erpgulf_gt_settings_render()
             </p>
         </form>
 
-        <!-- ── Tools & Maintenance ── -->
+        {{!-- ── Tools & Maintenance ── --}}
         <div style="background:#fff;padding:20px;border:1px solid #ccd0d4;border-radius:4px;margin-top:20px;max-width:900px;">
             <h3 style="margin-top:0;">🔧 Tools &amp; Maintenance</h3>
 
@@ -1005,7 +1005,7 @@ function erpgulf_gt_meta_box_render($post)
         <?php else: ?>
 
             <?php if ($en_in_trash && $en_post_id_raw): ?>
-                <!-- English post is in trash — show restore/delete options -->
+                {{!-- English post is in trash — show restore/delete options --}}
                 <div style="background:#fff8e1;border:1px solid #f0ad00;border-radius:4px;padding:10px;margin-bottom:10px;">
                     <p style="font-size:12px;color:#7a5c00;margin:0 0 8px;">
                         🗑️ <?php echo esc_html($target_lang); ?> version is in Trash
@@ -1793,6 +1793,10 @@ function erpgulf_gt_sync_woo_fields(int $from_id, int $to_id, bool $is_create = 
     erpgulf_gt_copy_branch_stock($from_id, $to_id);
     erpgulf_gt_copy_kit_variants($from_id, $to_id);
     erpgulf_gt_copy_woosb_ids($from_id, $to_id);
+    $erpgulf_synced_product = wc_get_product($to_id);
+    if ($erpgulf_synced_product) {
+        $erpgulf_synced_product->save();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -2154,15 +2158,6 @@ function erpgulf_gt_link_term_to_wpml(int $en_term_id, int $ar_term_id, string $
             'source_language_code' => ICL_LANGUAGE_CODE,
         ]);
     }
-
-    // The term is only language-registered as of the write above, so run the
-    // parent-language guard here. On created_product_cat it fires *before* this
-    // link exists, finds no language, and skips — which is how 29 English terms
-    // ended up parented under Arabic categories and vanished from English
-    // subcategory lists and the mega-menu.
-    if ($taxonomy === 'product_cat') {
-        erpgulf_gt_fix_term_parent_lang((int) $en_term_id, (int) $en_tt_id);
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -2266,7 +2261,7 @@ function erpgulf_gt_bulk_page_render()
     ?>
     <div class="wrap" style="max-width:1000px;">
 
-        <!-- ── Header ── -->
+        {{!-- ── Header ── --}}
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
             <div>
                 <h1 style="margin:0;">🤖 Bulk Translate</h1>
@@ -2285,7 +2280,7 @@ function erpgulf_gt_bulk_page_render()
             </div>
         <?php endif; ?>
 
-        <!-- ── Stats bar ── -->
+        {{!-- ── Stats bar ── --}}
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
             <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:16px;text-align:center;">
                 <div style="font-size:28px;font-weight:700;color:#007cba;" id="gt-count-total"><?php echo $total; ?></div>
@@ -2301,7 +2296,7 @@ function erpgulf_gt_bulk_page_render()
             </div>
         </div>
 
-        <!-- ── Progress bar ── -->
+        {{!-- ── Progress bar ── --}}
         <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:20px;margin-bottom:20px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                 <span style="font-size:13px;font-weight:600;" id="gt-progress-label">Ready to start</span>
@@ -2337,7 +2332,7 @@ function erpgulf_gt_bulk_page_render()
             </div>
         </div>
 
-        <!-- ── Maintenance Tools ── -->
+        {{!-- ── Maintenance Tools ── --}}
         <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:20px;margin-bottom:20px;">
             <h3 style="margin:0 0 14px;font-size:14px;color:#333;">🔧 Maintenance Tools</h3>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">
@@ -2414,10 +2409,10 @@ function erpgulf_gt_bulk_page_render()
             </div>
         </div>
 
-        <!-- ── Two column layout ── -->
+        {{!-- ── Two column layout ── --}}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
 
-            <!-- Product list ── -->
+            {{!-- Product list ── --}}
             <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                     <h3 style="margin:0;font-size:14px;">
@@ -2457,7 +2452,7 @@ function erpgulf_gt_bulk_page_render()
                 </div>
             </div>
 
-            <!-- Live log ── -->
+            {{!-- Live log ── --}}
             <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:16px;">
                 <h3 style="margin:0 0 12px;font-size:14px;">📡 Live Log</h3>
                 <div id="gt-log"
@@ -2900,15 +2895,7 @@ function erpgulf_gt_queue_csv_regen(): void
     }
 }
 
-add_action('erpgulf_gt_csv_regen', 'erpgulf_gt_csv_regen_logged');
-
-function erpgulf_gt_csv_regen_logged(): void
-{
-    $r = erpgulf_gt_generate_vehicles_csv();
-    if (empty($r['success'])) {
-        error_log('erpgulf_gt_csv_regen FAILED: ' . ($r['message'] ?? 'unknown'));
-    }
-}
+add_action('erpgulf_gt_csv_regen', 'erpgulf_gt_generate_vehicles_csv');
 
 function erpgulf_gt_copy_kit_variants(int $from_id, int $to_id): void
 {
@@ -3777,63 +3764,4 @@ function erpgulf_gt_ensure_wpml_link(int $ar_id, int $en_id, string $lang_code):
         'language_code' => $lang_code,
         'source_language_code' => 'ar',
     ]);
-}
-
-add_action('created_product_cat', 'erpgulf_gt_fix_term_parent_lang', 20, 2);
-add_action('edited_product_cat', 'erpgulf_gt_fix_term_parent_lang', 20, 2);
-
-/**
- * A translated category must sit under the translated parent. The translator
- * has been creating English terms under the Arabic parent, which drops them
- * out of that language's subcategory lists and mega-menu entirely.
- */
-function erpgulf_gt_fix_term_parent_lang($term_id, $tt_id): void
-{
-    global $wpdb;
-
-    $parent = (int) $wpdb->get_var($wpdb->prepare(
-        "SELECT parent FROM {$wpdb->term_taxonomy} WHERE term_taxonomy_id = %d",
-        $tt_id
-    ));
-    if ($parent <= 0)
-        return;
-
-    $lang = $wpdb->get_var($wpdb->prepare(
-        "SELECT language_code FROM {$wpdb->prefix}icl_translations
-          WHERE element_type = 'tax_product_cat' AND element_id = %d",
-        $tt_id
-    ));
-    if (!$lang)
-        return;
-
-    $p_ttid = $wpdb->get_var($wpdb->prepare(
-        "SELECT term_taxonomy_id FROM {$wpdb->term_taxonomy}
-          WHERE term_id = %d AND taxonomy = 'product_cat'",
-        $parent
-    ));
-    if (!$p_ttid)
-        return;
-
-    $p_lang = $wpdb->get_var($wpdb->prepare(
-        "SELECT language_code FROM {$wpdb->prefix}icl_translations
-          WHERE element_type = 'tax_product_cat' AND element_id = %d",
-        $p_ttid
-    ));
-    if (!$p_lang || $p_lang === $lang)
-        return;
-
-    $want = apply_filters('wpml_object_id', $parent, 'product_cat', false, $lang);
-    if (!$want || (int) $want === $parent)
-        return;
-
-    // Direct update, not wp_update_term — avoids re-firing edited_product_cat.
-    $wpdb->update(
-        $wpdb->term_taxonomy,
-        ['parent' => (int) $want],
-        ['term_taxonomy_id' => (int) $tt_id],
-        ['%d'],
-        ['%d']
-    );
-    clean_term_cache([(int) $term_id], 'product_cat');
-    delete_option('product_cat_children');
 }
