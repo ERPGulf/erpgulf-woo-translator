@@ -1793,6 +1793,17 @@ function erpgulf_gt_sync_woo_fields(int $from_id, int $to_id, bool $is_create = 
     erpgulf_gt_copy_branch_stock($from_id, $to_id);
     erpgulf_gt_copy_kit_variants($from_id, $to_id);
     erpgulf_gt_copy_woosb_ids($from_id, $to_id);
+    $erpgulf_price_val = get_post_meta($to_id, '_price', true);
+    if ($erpgulf_price_val !== '' && is_numeric($erpgulf_price_val)) {
+        global $wpdb;
+        $wpdb->update(
+            $wpdb->prefix . 'wc_product_meta_lookup',
+            array('min_price' => (float) $erpgulf_price_val, 'max_price' => (float) $erpgulf_price_val),
+            array('product_id' => (int) $to_id),
+            array('%f', '%f'),
+            array('%d')
+        );
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────
