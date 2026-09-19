@@ -51,6 +51,7 @@ require_once plugin_dir_path(__FILE__) . 'claude-provider.php';
 require_once plugin_dir_path(__FILE__) . 'erpgulf-gt-pages.php';
 require_once plugin_dir_path(__FILE__) . 'erpgulf-gt-rest.php';
 require_once plugin_dir_path(__FILE__) . 'erpgulf-gt-translation.php';
+require_once plugin_dir_path(__FILE__) . 'vehicle-terms.php';
 
 // ─────────────────────────────────────────────────────────────────
 // PROVIDER REGISTRY
@@ -1604,6 +1605,14 @@ function erpgulf_gt_save_to_wpml(int $ar_post_id, array $translations, string $t
     if (is_wp_error($new_post_id))
         return $new_post_id;
 
+    // Link FIRST, before the term sync below, which calls the translation API
+    // per term and can take seconds. If anything downstream times out, the twin
+    // stays discoverable via wpml_object_id() and is repaired on the next run,
+    // instead of becoming an invisible orphan that the next sync re-creates.
+    // That orphan path is what produced the 2,071 duplicate products.
+    erpgulf_gt_ensure_wpml_link($ar_post_id, $new_post_id, $lang_code);
+    erpgulf_gt_sync_sku($ar_post_id, $new_post_id);
+
     foreach ($translations as $field => $value) {
         if (in_array($field, ['title', 'content', 'excerpt'], true))
             continue;
@@ -1689,6 +1698,18 @@ function erpgulf_gt_translate_repeater(
                 continue;
             }
 
+            // Vehicle brand / model / variant are proper nouns with fixed forms in
+            // both languages. They must never reach the AI: "ماكان" (Macan) reads as
+            // "ma kan" and came back as "It was not" / "What it was"; a two-word model
+            // name also came back as "Please provide the Arabic text you would like me
+            // to translate." 4,022 rows were wrong across 173 distinct values.
+            // Static lookup only; on a miss keep the source value and log it, so a
+            // gap in the table shows up as untranslated rather than as garbage.
+            if (in_array($sub_field, ['model', 'brand', 'variant'], true)) {
+                $row[$sub_field] = erpgulf_gt_vehicle_term($value, $target_lang);
+                continue;
+            }
+
             $prompt = "Translate the following {$source_lang} text to {$target_lang}. "
                 . "Return only the translated text. No explanation.\n\n{$value}";
 
@@ -1756,6 +1777,8 @@ function erpgulf_gt_sync_woo_fields(int $from_id, int $to_id, bool $is_create = 
         '_featured',
         '_visibility',
         'mark_spare_part',
+        'woosb_disable_auto_price',
+        'woosb_manage_stock',
     ];
 
     $create_only = [
@@ -1954,6 +1977,18 @@ function erpgulf_gt_handle_sync_all()
             $counts['categories']++;
         }
 
+        // Rebuild bundle children if any reference is dead
+        $en_woosb = maybe_unserialize(get_post_meta($en_id, 'woosb_ids', true));
+        if (is_array($en_woosb)) {
+            foreach ($en_woosb as $wi) {
+                $wc = isset($wi['id']) ? (int) $wi['id'] : 0;
+                if ($wc && !get_post($wc)) {
+                    erpgulf_gt_copy_woosb_ids($ar_id, $en_id);
+                    break;
+                }
+            }
+        }
+
         // Sync kit_variants
         $ar_kit = get_post_meta($ar_id, 'kit_variants', true);
         $en_kit = get_post_meta($en_id, 'kit_variants', true);
@@ -2032,7 +2067,13 @@ function erpgulf_gt_sync_terms(int $from_id, int $to_id, string $lang_code, call
                 $ids_to_set[] = (int) $translated_term_id;
             } elseif ($translate_fn && in_array($taxonomy, ['product_cat', 'offer_category'], true)) {
                 $new_term_id = erpgulf_gt_create_english_term($term, $lang_code, $translate_fn, $settings, $source_lang, $target_lang);
-                $ids_to_set[] = $new_term_id ? (int) $new_term_id : (int) $term->term_id;
+                if ($new_term_id) {
+                    $ids_to_set[] = (int) $new_term_id;
+                }
+                // No fallback to $term->term_id: that is the ARABIC term, and
+                // attaching it here puts an Arabic category on an English product
+                // (the cross-language leak). Better to leave the term off and let
+                // the next run translate it properly.
             } else {
                 $ids_to_set[] = (int) $term->term_id;
             }
@@ -2076,11 +2117,25 @@ function erpgulf_gt_create_english_term(WP_Term $ar_term, string $lang_code, cal
         $result = $translate_fn($prompt, $settings);
         if (is_wp_error($result) || empty(trim((string) $result)))
             return false;
+        // The model sometimes answers with a sentence instead of a name, e.g.
+        // "Please provide the Arabic product category name." Those were being
+        // written into the taxonomy as real terms. Reject; the next run retries.
+        if (erpgulf_gt_looks_like_ai_chatter((string) $result) ||
+                erpgulf_gt_looks_like_ai_translation_failure((string) $result, $ar_term->name)) {
+            error_log('[erpgulf_gt] rejected AI chatter for term "' . $ar_term->name . '": ' . substr((string) $result, 0, 120));
+            return false;
+        }
         // Strip path/punctuation the AI sometimes adds (e.g. "Engine> Engine Oil Filter").
         $en_name = trim(preg_replace('/\s+/', ' ', str_replace(['>', '/', '\\', '|'], ' ', (string) $result)));
         $en_name = trim($en_name, " \t\n\r\0\v-–—:>");
         if ($en_name === '')
             return false;
+        // Validate BEFORE caching - a bad name written to term meta here becomes
+        // permanent and is reused by every subsequent product.
+        if (!erpgulf_gt_validate_en_term_name($en_name)) {
+            error_log('[erpgulf_gt] rejected invalid term name for "' . $ar_term->name . '": ' . $en_name);
+            return false;
+        }
         update_term_meta($ar_term->term_id, '_erpgulf_gt_en_name', $en_name);
     }
 
@@ -2725,6 +2780,14 @@ function erpgulf_gt_branch_stock_sync($meta_id, $post_id, $meta_key, $meta_value
             '_stock_status',
             '_manage_stock',
             '_backorders',
+            // WooSB only honours the parent's own prices when these are set.
+            // Missing on the English twin, the bundle recomputed from its
+            // children and reported no sale price — rendering as "100% OFF".
+            'woosb_disable_auto_price',
+            'woosb_manage_stock',
+            // Marker pushed by the ERP kit sync; always changes, so it reliably
+            // triggers the kit_variants re-map even when the row count is stable.
+            'kit_variants_sync',
         ], true)
     );
     if (!$watch)
@@ -2748,7 +2811,7 @@ function erpgulf_gt_branch_stock_sync($meta_id, $post_id, $meta_key, $meta_value
     if (!$en_post_id || $en_post_id === $post_id)
         return;
 
-    if ($meta_key === 'kit_variants') {
+    if ($meta_key === 'kit_variants' || $meta_key === 'kit_variants_sync') {
         erpgulf_gt_copy_kit_variants($post_id, $en_post_id);
     } else {
         update_post_meta($en_post_id, $meta_key, $meta_value);
@@ -2888,7 +2951,13 @@ function erpgulf_gt_flush_fitment_dirty(): void
     }
     $erpgulf_gt_fitment_dirty = [];
 
-    erpgulf_gt_queue_csv_regen();
+    // vehicles.csv is no longer read at runtime — the theme queries
+    // wp_adv_product_fitments directly — so there is nothing to regenerate here.
+    // The brand list is cached for 12h, so drop it whenever fitment data changes,
+    // otherwise a newly synced brand would not appear in the dropdown until the
+    // transient expired.
+    delete_transient('vg_fitment_brands');
+    update_option('adv_fitment_tree_stamp', time(), false);
 }
 
 // (single-product reindex lives in erpgulf_gt_fitment_reindex_product below)
@@ -3036,6 +3105,9 @@ function erpgulf_gt_kit_option_to_english(string $value): string
         'سفلي خلفي' => 'Lower Rear',
         'مركزي' => 'Center',
         'وسطي' => 'Middle',
+        'مستهلكات' => 'Consumables',
+        'ملحقات' => 'Accessories',
+        'أمامي خلفي' => 'Front Rear',
         'يسار' => 'Left',
         'يمين' => 'Right',
         'جانب السائق' => 'Driver Side',
@@ -3543,8 +3615,10 @@ function erpgulf_gt_auto_run($product_id)
             if ($api_error && empty($translations)) {
                 erpgulf_gt_log($product_id, 'retry', 'AI provider failed (rate limit?) — backing off');
                 erpgulf_gt_auto_retry($product_id);
-                if ($fitment_touched)
-                    erpgulf_gt_queue_csv_regen();
+                if ($fitment_touched) {
+                    delete_transient('vg_fitment_brands');
+                    update_option('adv_fitment_tree_stamp', time(), false);
+                }
                 error_reporting($old_er);
                 return;
             }
@@ -3613,8 +3687,10 @@ function erpgulf_gt_auto_run($product_id)
     update_post_meta($product_id, '_erpgulf_gt_price_hash', $price_hash);
     update_post_meta($product_id, '_erpgulf_gt_stock_hash', $stock_hash);
 
-    if ($fitment_touched)
-        erpgulf_gt_queue_csv_regen();
+    if ($fitment_touched) {
+        delete_transient('vg_fitment_brands');
+        update_option('adv_fitment_tree_stamp', time(), false);
+    }
 
     error_reporting($old_er);
 }
@@ -3847,4 +3923,170 @@ function erpgulf_gt_fix_term_parent_lang($term_id, $tt_id): void
     );
     clean_term_cache([(int) $term_id], 'product_cat');
     delete_option('product_cat_children');
+}
+
+function erpgulf_gt_rest_translate(WP_REST_Request $request)
+{
+    global $wpdb;
+    $sku = trim((string) $request->get_param('sku'));
+    $post_id = (int) $request->get_param('post_id');
+    if (!$post_id && $sku !== '') {
+        $post_id = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_sku' AND meta_value = %s LIMIT 1",
+            $sku
+        ));
+    }
+    if (!$post_id) {
+        return new WP_Error('erpgulf_gt_not_found', 'No product found for that SKU.', ['status' => 404]);
+    }
+    $post = get_post($post_id);
+    if (!$post || $post->post_type !== 'product') {
+        return new WP_Error('erpgulf_gt_not_product', 'Not a product.', ['status' => 404]);
+    }
+    $src = erpgulf_gt_lang_name_to_code(get_option('erpgulf_gt_source_lang', 'Arabic'));
+    $lang = apply_filters('wpml_element_language_code', null, ['element_id' => $post_id, 'element_type' => 'post_product']);
+    if ($lang && $lang !== $src) {
+        return new WP_Error('erpgulf_gt_wrong_lang', 'That product is not in the source language.', ['status' => 400]);
+    }
+    if ($request->get_param('force')) {
+        delete_post_meta($post_id, '_erpgulf_gt_text_hash');
+        delete_post_meta($post_id, '_erpgulf_gt_compat_hash');
+    }
+    if (function_exists('as_schedule_single_action')) {
+        as_schedule_single_action(time(), 'erpgulf_gt_auto_run', [$post_id], 'erpgulf-gt');
+    } else {
+        wp_schedule_single_event(time(), 'erpgulf_gt_auto_run', [$post_id]);
+    }
+    return rest_ensure_response(['ok' => true, 'post_id' => $post_id, 'message' => 'Translation queued.']);
+}
+
+add_filter('woocommerce_rest_is_request_to_rest_api', function ($is_request) {
+    if (!$is_request && !empty($_SERVER['REQUEST_URI'])) {
+        $prefix = trailingslashit(rest_get_url_prefix());
+        if (strpos($_SERVER['REQUEST_URI'], $prefix . 'erpgulf-gt/') !== false) {
+            return true;
+        }
+    }
+    return $is_request;
+});
+
+add_action('rest_api_init', function () {
+    register_rest_route('erpgulf-gt/v1', '/translate', [
+        'methods' => 'POST',
+        'callback' => 'erpgulf_gt_rest_translate',
+        'permission_callback' => function () {
+            return current_user_can('edit_products');
+        },
+    ]);
+});
+add_action('rest_api_init', function () {
+    register_rest_route('erpgulf-gt/v1', '/translate-status', [
+        'methods' => 'GET',
+        'callback' => 'erpgulf_gt_rest_translate_status',
+        'permission_callback' => function () {
+            return current_user_can('edit_products');
+        },
+    ]);
+});
+
+function erpgulf_gt_rest_translate_status(WP_REST_Request $request)
+{
+    global $wpdb;
+    $sku = trim((string) $request->get_param('sku'));
+    $post_id = (int) $request->get_param('post_id');
+    if (!$post_id && $sku !== '') {
+        $post_id = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_sku' AND meta_value = %s LIMIT 1",
+            $sku
+        ));
+    }
+    if (!$post_id) {
+        return new WP_Error('erpgulf_gt_not_found', 'No product found for that SKU.', ['status' => 404]);
+    }
+    $tgt = erpgulf_gt_lang_name_to_code(get_option('erpgulf_gt_target_lang', 'English'));
+    $en_id = apply_filters('wpml_object_id', $post_id, 'product', false, $tgt);
+    return rest_ensure_response([
+        'post_id' => $post_id,
+        'status' => (string) get_post_meta($post_id, '_erpgulf_gt_auto_status', true),
+        'time' => (string) get_post_meta($post_id, '_erpgulf_gt_auto_time', true),
+        'detail' => (string) get_post_meta($post_id, '_erpgulf_gt_auto_detail', true),
+        'en_post_id' => $en_id ? (int) $en_id : 0,
+        'en_title' => $en_id ? get_the_title($en_id) : '',
+    ]);
+}
+
+add_action('updated_post_meta', 'erpgulf_gt_price_lookup_live', 10, 4);
+add_action('added_post_meta', 'erpgulf_gt_price_lookup_live', 10, 4);
+
+function erpgulf_gt_price_lookup_live($meta_id, $post_id, $meta_key, $meta_value): void
+{
+    if ($meta_key !== '_price')
+        return;
+    if (get_post_type($post_id) !== 'product')
+        return;
+    if (!is_numeric($meta_value) || (float) $meta_value <= 0)
+        return;
+    if (has_term('variable', 'product_type', $post_id))
+        return;
+
+    global $wpdb;
+    $wpdb->update(
+        $wpdb->prefix . 'wc_product_meta_lookup',
+        array('min_price' => (float) $meta_value, 'max_price' => (float) $meta_value),
+        array('product_id' => (int) $post_id),
+        array('%f', '%f'),
+        array('%d')
+    );
+}
+
+add_action('init', function () {
+    if (!wp_next_scheduled('erpgulf_gt_bundle_repair')) {
+        wp_schedule_event(time() + 600, 'daily', 'erpgulf_gt_bundle_repair');
+    }
+});
+
+add_action('erpgulf_gt_bundle_repair', 'erpgulf_gt_run_bundle_repair');
+
+function erpgulf_gt_run_bundle_repair(): void
+{
+    global $wpdb;
+    $tgt = erpgulf_gt_lang_name_to_code(get_option('erpgulf_gt_target_lang', 'English'));
+    $src = erpgulf_gt_lang_name_to_code(get_option('erpgulf_gt_source_lang', 'Arabic'));
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT pm.post_id, pm.meta_value
+         FROM {$wpdb->postmeta} pm
+         JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+              AND p.post_type = 'product' AND p.post_status = 'publish'
+         JOIN {$wpdb->prefix}icl_translations t ON t.element_id = pm.post_id
+              AND t.element_type = 'post_product' AND t.language_code = %s
+         WHERE pm.meta_key = 'woosb_ids' AND pm.meta_value != ''",
+        $tgt
+    ));
+    $fixed = 0;
+    foreach ($rows as $r) {
+        $ids = maybe_unserialize($r->meta_value);
+        if (!is_array($ids)) {
+            continue;
+        }
+        $bad = false;
+        foreach ($ids as $i) {
+            $c = isset($i['id']) ? (int) $i['id'] : 0;
+            if ($c && !get_post($c)) {
+                $bad = true;
+                break;
+            }
+        }
+        if (!$bad) {
+            continue;
+        }
+        $ar = (int) apply_filters('wpml_object_id', $r->post_id, 'product', false, $src);
+        if (!$ar || $ar === (int) $r->post_id) {
+            continue;
+        }
+        erpgulf_gt_copy_woosb_ids($ar, (int) $r->post_id);
+        $fixed++;
+    }
+    if ($fixed) {
+        error_log(sprintf('[ERPGulf GT] bundle repair rebuilt %d bundle(s)', $fixed));
+    }
 }
